@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Limbus Company TRPG · 车卡器</title>
+<link rel="stylesheet" href="建卡器.css">
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand">
+      <h1>Limbus Company TRPG · 建卡器</h1>
+      <div class="sub">Character Creation</div>
+    </div>
+    <nav class="steps" id="stepChips"></nav>
+  </header>
+
+  <main class="stage">
+    <div class="card" id="stageCard"></div>
+    <div class="nav">
+      <button class="btn ghost" id="btnBack">← 返回上一步</button>
+      <button class="btn primary" id="btnNext">下一步 →</button>
+    </div>
+  </main>
+
+  <aside class="summary">
+    <div class="card">
+      <h3>当前角色卡</h3>
+      <div id="sideSummary"></div>
+    </div>
+  </aside>
+</div>
+
+<canvas id="exportCanvas" width="760" height="3600"></canvas>
+<div class="toast" id="toast"></div>
+
+<script src="建卡器.js"></script>
+</body>
+</html>
