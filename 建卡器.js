@@ -87,7 +87,7 @@ const CARD_BASE_EFFECT = {
   defense:"拼点胜利 → 完全格挡；失败 → 你恢复 2 HP",
   buff:"你或一名友方立即恢复 2 HP",
   shield:"拼点胜利 → 友方不受伤害；失败 → 你替友方受全部伤害，你获得 2 临时生命",
-  debuff:"对一名敌人造成 2 点精神伤害",
+  debuff:"一名敌人本轮拼点骰 -1",
   support:"你或一名友方本轮拼点骰 +1"
 };
 const CARD_SKILL_BASE = {
@@ -95,10 +95,10 @@ const CARD_SKILL_BASE = {
   defense:    {small:"拼点胜利完全格挡；失败→恢复5HP", large:"拼点胜利完全格挡；失败→恢复8HP"},
   buff:       {small:"恢复3HP+获得2临时生命", large:"恢复5HP+获得4临时生命"},
   shield:     {small:"拼点胜利→友方不受伤害，你获得2临时生命；失败→你替友方受全部伤害，你获得4临时生命", large:"拼点胜利→友方不受伤害，你获得3临时生命；失败→你替友方受全部伤害，你获得6临时生命"},
-  debuff:     {small:"造成3点精神伤害", large:"造成5点精神伤害"},
+  debuff:     {small:"一名敌人本轮拼点骰 -2", large:"一名敌人本轮拼点骰 -3"},
   support:    {small:"拼点骰+2", large:"拼点骰+3"},
   special:    {small:"弃掉一张未使用卡片，恢复3HP", large:"弃掉两张未使用卡片，恢复5HP"},
-  multiAttack:{small:"加入一张基础攻击卡", large:"加入一张基础攻击卡，攻击生效两次"}
+  multiAttack:{small:"额外消耗本组一张未使用的基础攻击卡，本回合发动两次攻击、各自独立拼点，每次基础伤害3；无基础攻击卡可消耗时只发动一次，基础伤害5", large:"额外消耗本组一张未使用的基础攻击卡，本回合发动两次攻击、各自独立拼点，每次基础伤害5；无基础攻击卡可消耗时只发动一次，基础伤害8"}
 };
 
 /* 七罪技能特效问答数据（8.1-8.7） */
@@ -121,7 +121,7 @@ const SIN_TRAIT_QA = {
         {question:"你的怒火从何而来？",options:[
           {label:"愤怒",effect:"伤害 +3"},
           {label:"燃烧",effect:"命中后目标在本轮结束时受到 3 点灼烧伤害"},
-          {label:"背叛",effect:"若目标曾攻击过你，本次伤害 +4"}
+          {label:"积怨",effect:"若你本轮已受到过伤害，本次伤害 +4"}
         ]},
         {question:"它让你能够____。",options:[
           {label:"尽情释放",effect:"你的拼点骰 +2"},
@@ -396,7 +396,7 @@ const SIN_TRAIT_QA = {
         {question:"你的痛苦如何伤害他人？",options:[
           {label:"腐蚀",effect:"目标本轮拼点骰 -1"},
           {label:"沉重",effect:"命中后目标本轮当前速度 -2"},
-          {label:"精神侵蚀",effect:"命中后目标受到 3 点精神伤害"}
+          {label:"侵蚀",effect:"命中后目标本轮不能恢复 HP、不能获得临时生命"}
         ]},
         {question:"你付出的代价是什么？",options:[
           {label:"自责",effect:"你受到 2 点伤害，本次伤害 +3"},
@@ -408,7 +408,7 @@ const SIN_TRAIT_QA = {
         {question:"你的痛苦如何伤害他人？",options:[
           {label:"腐蚀",effect:"目标本轮拼点骰 -2"},
           {label:"沉重",effect:"命中后目标本轮当前速度 -3"},
-          {label:"精神侵蚀",effect:"命中后目标受到 5 点精神伤害"}
+          {label:"侵蚀",effect:"命中后目标本轮不能恢复 HP、不能获得临时生命，且本轮拼点骰 -1"}
         ]},
         {question:"你付出的代价是什么？",options:[
           {label:"自责",effect:"你受到 3 点伤害，本次伤害 +4"},
@@ -417,7 +417,7 @@ const SIN_TRAIT_QA = {
         ]},
         {question:"苦难的尽头是？",options:[
           {label:"共鸣",effect:"若你当前 HP 低于 50%，本次伤害 +4"},
-          {label:"绝望蔓延",effect:"目标和其相邻的敌人各受到 3 点精神伤害"},
+          {label:"绝望蔓延",effect:"与目标相邻的敌人本轮拼点骰各 -2，且本轮受到的伤害各 +2"},
           {label:"【切换】忧郁气场",effect:"切换到此攻击模式时，所有敌人本轮拼点骰 -1"}
         ]}
       ]
@@ -425,30 +425,30 @@ const SIN_TRAIT_QA = {
     debuff:{
       small:[
         {question:"你要夺走什么？",options:[
-          {label:"力量",effect:"目标本轮攻击拼点骰 -2"},
-          {label:"意志",effect:"目标本轮拼点骰 -2"},
+          {label:"力量",effect:"目标本轮攻击拼点骰额外 -1"},
+          {label:"意志",effect:"目标本轮防御拼点骰额外 -1"},
           {label:"敏锐",effect:"目标本轮当前速度 -2"}
         ]},
-        {question:"减益如何传播？",options:[
-          {label:"蔓延",effect:"目标和其相邻的一名敌人本轮拼点骰各 -1"},
-          {label:"加深",effect:"目标受到 2 点精神伤害"},
-          {label:"爆发",effect:"目标受到 3 点精神伤害"}
+        {question:"痛苦如何扩散？",options:[
+          {label:"蔓延",effect:"与目标相邻的一名敌人本轮拼点骰 -1"},
+          {label:"加深",effect:"目标本轮受到的伤害 +2"},
+          {label:"自苦",effect:"你受到 2 点伤害，目标本轮拼点骰额外 -2"}
         ]}
       ],
       large:[
         {question:"你要夺走什么？",options:[
-          {label:"力量",effect:"目标本轮攻击拼点骰 -3"},
-          {label:"意志",effect:"目标本轮拼点骰 -3"},
+          {label:"力量",effect:"目标本轮攻击拼点骰额外 -2"},
+          {label:"意志",effect:"目标本轮防御拼点骰额外 -2"},
           {label:"敏锐",effect:"目标本轮当前速度 -3"}
         ]},
-        {question:"减益如何传播？",options:[
-          {label:"蔓延",effect:"目标和其所有相邻的敌人本轮拼点骰各 -1"},
-          {label:"加深",effect:"目标受到 4 点精神伤害"},
-          {label:"爆发",effect:"目标受到 5 点精神伤害"}
+        {question:"痛苦如何扩散？",options:[
+          {label:"蔓延",effect:"与目标相邻的所有敌人本轮拼点骰各 -1"},
+          {label:"加深",effect:"目标本轮受到的伤害 +3"},
+          {label:"自苦",effect:"你受到 3 点伤害，目标本轮拼点骰额外 -3"}
         ]},
         {question:"剥夺的尽头是？",options:[
-          {label:"虚弱领域",effect:"所有敌人受到 2 点精神伤害"},
-          {label:"以痛止痛",effect:"你受到 2 点伤害，目标本轮拼点骰 -3"},
+          {label:"虚弱领域",effect:"所有敌人本轮当前速度 -1"},
+          {label:"以痛止痛",effect:"你受到 2 点伤害，一名友方本轮拼点骰 +2"},
           {label:"【切换】绝望之影",effect:"切换到此攻击模式时，所有敌人本轮当前速度 -2"}
         ]}
       ]
@@ -459,7 +459,7 @@ const SIN_TRAIT_QA = {
       small:[
         {question:"你如何证明自己？",options:[
           {label:"精准",effect:"你的拼点骰 +1"},
-          {label:"从容",effect:"若你上一轮未受到伤害，你的拼点骰 +2"},
+          {label:"从容",effect:"若你本轮尚未受到伤害，你的拼点骰 +2"},
           {label:"优越",effect:"若你的当前 HP 高于目标，伤害 +2"}
         ]},
         {question:"你的方式是什么？",options:[
@@ -471,7 +471,7 @@ const SIN_TRAIT_QA = {
       large:[
         {question:"你如何证明自己？",options:[
           {label:"精准",effect:"你的拼点骰 +2"},
-          {label:"从容",effect:"若你上一轮未受到伤害，你的拼点骰 +3"},
+          {label:"从容",effect:"若你本轮尚未受到伤害，你的拼点骰 +3"},
           {label:"优越",effect:"若你的当前 HP 高于目标，伤害 +3"}
         ]},
         {question:"你的方式是什么？",options:[
@@ -553,25 +553,25 @@ const SIN_TRAIT_QA = {
     attack:{
       small:[
         {question:"你羡慕什么？",options:[
-          {label:"力量",effect:"本次攻击的基础伤害替换为目标上一次使用的攻击卡的基础伤害（若更高则替换，否则不变）"},
+          {label:"力量",effect:"若目标的力量、灵巧、认知中任一项高于你的对应属性，本次伤害 +3"},
           {label:"运气",effect:"命中后你本轮当前速度 +2"},
           {label:"拥有",effect:"若目标的当前 HP 高于你，本次伤害 +3"}
         ]},
         {question:"你会怎么做？",options:[
           {label:"夺过来",effect:"目标本轮拼点骰 -1"},
-          {label:"模仿",effect:"你本轮获得目标上一次使用的攻击卡的一条特效"},
+          {label:"模仿",effect:"本次攻击可改用力量、灵巧、认知中任一项作为拼点属性"},
           {label:"毁掉",effect:"命中后你对同一目标立即造成 2 点额外伤害"}
         ]}
       ],
       large:[
         {question:"你羡慕什么？",options:[
-          {label:"力量",effect:"本次攻击的基础伤害替换为目标上一次使用的攻击卡的基础伤害（若更高则替换，否则不变）"},
+          {label:"力量",effect:"若目标的力量、灵巧、认知中任一项高于你的对应属性，本次伤害 +4"},
           {label:"运气",effect:"命中后你本轮当前速度 +3"},
           {label:"拥有",effect:"若目标的当前 HP 高于你，本次伤害 +4"}
         ]},
         {question:"你会怎么做？",options:[
           {label:"夺过来",effect:"目标本轮拼点骰 -2"},
-          {label:"模仿",effect:"你本轮获得目标上一次使用的攻击卡的两条特效"},
+          {label:"模仿",effect:"本次攻击可改用力量、灵巧、认知中任一项作为拼点属性，且你的拼点骰 +1"},
           {label:"毁掉",effect:"命中后你对同一目标立即造成 3 点额外伤害"}
         ]},
         {question:"不甘的尽头是？",options:[
@@ -606,7 +606,7 @@ const SIN_TRAIT_QA = {
           {label:"冷静",effect:"防御成功时你的罪孽压力 -1（最低为0）"}
         ]},
         {question:"嫉妒之壁的尽头是？",options:[
-          {label:"全盘模仿",effect:"防御成功时，你获得攻击者上一次使用卡片的一条特效"},
+          {label:"全盘模仿",effect:"防御成功时，你获得本次攻击者所用卡片的一条特效，本轮内有效"},
           {label:"后来居上",effect:"若你的 HP 低于攻击者，防御成功时你恢复 3 HP"},
           {label:"【切换】不甘之壁",effect:"切换到此攻击模式时，你获得 3 点临时生命"}
         ]}
@@ -621,7 +621,7 @@ const SIN_TRAIT_QA = {
         ]},
         {question:"你的手段是什么？",options:[
           {label:"竞争",effect:"一名友方本轮拼点骰 +1，一名敌人本轮拼点骰 -1"},
-          {label:"窃取",effect:"一名敌人受到 2 点精神伤害，一名友方恢复 2 HP"},
+          {label:"窃取",effect:"一名敌人本轮拼点骰 -1，一名友方恢复 2 HP"},
           {label:"标记",effect:"你对一名敌人立即造成 1 点伤害"}
         ]}
       ],
@@ -633,7 +633,7 @@ const SIN_TRAIT_QA = {
         ]},
         {question:"你的手段是什么？",options:[
           {label:"竞争",effect:"一名友方本轮拼点骰 +2，一名敌人本轮拼点骰 -2"},
-          {label:"窃取",effect:"一名敌人受到 3 点精神伤害，一名友方恢复 3 HP"},
+          {label:"窃取",effect:"一名敌人本轮拼点骰 -2，一名友方恢复 3 HP"},
           {label:"标记",effect:"你对一名敌人立即造成 2 点伤害"}
         ]},
         {question:"嫉妒的尽头是？",options:[
@@ -646,6 +646,149 @@ const SIN_TRAIT_QA = {
   }
 };
 
+/* ============ E.G.O 系统数据（ZAYIN 档） ============ */
+const EGO_TYPES = {
+  assault:   {label:"侵袭", clash:true},
+  blessing:  {label:"庇佑", clash:false},
+  corruption:{label:"蚀变", clash:false}
+};
+
+const EGO_TYPE_BASE = {
+  assault:    "拼点胜利 → 造成 8 + 差值 的伤害；你的拼点骰 +1",
+  blessing:   "你与一名友方各恢复 4 HP，各获得 3 点临时生命",
+  corruption: "本轮你的拼点骰 +2；所有敌人本轮拼点骰 -1"
+};
+
+/* 核心罪孽专属特效（免费附带，不占问答名额）。忧郁在庇佑型下文案被替换（庇佑型不产生伤害数字） */
+const EGO_SIN_EFFECT = {
+  wrath:   {label:"燃尽",effect:"所有敌人本轮受到的伤害 +1"},
+  lust:    {label:"执心",effect:"本轮你每次恢复 HP 时，额外恢复 1 点"},
+  sloth:   {label:"静止",effect:"所有敌人本轮当前速度 -1"},
+  gluttony:{label:"吞食",effect:"本轮你造成伤害后，恢复其中 1/3（向下取整）"},
+  gloom:   {label:"共苦",effect:"你受到 2 点伤害，本次 E.G.O 所有数值效果 +2",
+            effectBlessing:"你本轮拼点骰 -2，本次 E.G.O 所有数值效果 +2"},
+  pride:   {label:"君临",effect:"本轮本次目标不能打出防御卡"},
+  envy:    {label:"夺冠",effect:"若场上有敌人当前 HP 高于你，本次 E.G.O 所有数值效果 +2"}
+};
+function getEgoSinEffect(){
+  const sin = egoSin();
+  if(!sin) return null;
+  const base = EGO_SIN_EFFECT[sin];
+  if(!base) return null;
+  if(sin==="gloom" && state.ego.type==="blessing") return {label:base.label, effect:base.effectBlessing};
+  return {label:base.label, effect:base.effect};
+}
+
+/* 三种类型各自的问答题库，结构与 SIN_TRAIT_QA 的问答数组一致 */
+const EGO_TYPE_QA = {
+  assault:[
+    {question:"你的罪孽如何显形？",options:[
+      {label:"撕裂",effect:"你的拼点骰额外 +2"},
+      {label:"贯穿",effect:"目标本轮防御拼点骰 -3"},
+      {label:"崩落",effect:"本次伤害 +3"}
+    ]},
+    {question:"代价由谁承担？",options:[
+      {label:"自噬",effect:"你受到 3 点伤害，本次伤害 +5"},
+      {label:"共担",effect:"一名友方受到 2 点伤害，你的拼点骰额外 +2"},
+      {label:"独扛",effect:"本轮你不能打出防御卡与援护卡，本次伤害 +4"}
+    ]},
+    {question:"它的终点是？",options:[
+      {label:"波及",effect:"与目标相邻的敌人各受到 5 点伤害"},
+      {label:"余烬",effect:"命中后所有敌人本轮受到的伤害 +2"},
+      {label:"反噬",effect:"若此次攻击未命中，你受到 6 点伤害；若命中，你恢复 5 HP"}
+    ]}
+  ],
+  blessing:[
+    {question:"它以什么形式庇护？",options:[
+      {label:"覆盖",effect:"所有友方额外获得 3 点临时生命"},
+      {label:"净化",effect:"所有友方本轮免疫拼点骰降低与当前速度降低效果"},
+      {label:"唤起",effect:"所有友方本轮拼点骰额外 +1"}
+    ]},
+    {question:"庇护的代价是？",options:[
+      {label:"燃身",effect:"你本轮拼点骰 -3，本卡所有恢复与临时生命数值 +3"},
+      {label:"独醒",effect:"本轮你不能打出攻击卡，所有友方本轮受到的伤害 -2"},
+      {label:"牵引",effect:"你本轮拼点骰 -2，所有友方本轮当前速度 +2"}
+    ]},
+    {question:"庇佑的尽头是？",options:[
+      {label:"不灭",effect:"本轮内友方的 HP 不会降至 1 以下"},
+      {label:"回响",effect:"本轮内友方每次拼点获胜，该友方恢复 2 HP"},
+      {label:"同心",effect:"所有友方本轮拼点骰再 +1，你恢复 5 HP"}
+    ]}
+  ],
+  corruption:[
+    {question:"侵蚀从哪里开始？",options:[
+      {label:"肢体",effect:"本轮你的攻击拼点骰额外 +2"},
+      {label:"感官",effect:"本轮你的当前速度 +3、防御拼点骰 +2"},
+      {label:"气场",effect:"所有敌人本轮当前速度额外 -2"}
+    ]},
+    {question:"它向外散播什么？",options:[
+      {label:"恐惧",effect:"所有敌人本轮防御拼点骰 -2"},
+      {label:"衰弱",effect:"所有敌人本轮受到的伤害 +2"},
+      {label:"停滞",effect:"所有敌人本轮不能恢复 HP、不能获得临时生命"}
+    ]},
+    {question:"蚀变的尽头是？",options:[
+      {label:"异形",effect:"本轮你每次拼点获胜，恢复 3 HP"},
+      {label:"支配",effect:"本轮你可以额外打出一张罪孽卡（不占用行动槽）"},
+      {label:"崩坏",effect:"本轮结束时你受到 5 点伤害，但本轮内你所有拼点骰再 +2"}
+    ]}
+  ]
+};
+function getEgoQA(){ return EGO_TYPE_QA[state.ego.type]||[]; }
+
+/* E.G.O 校验：核心罪孽存在 + 已选类型 + 名称已填 + 问答已按当前特效数量答完 */
+function validateEgoProfile(){
+  if(!egoSin()) return false;
+  if(!state.ego.type) return false;
+  if(state.ego.name.trim()==="") return false;
+  const ec = egoEffectCount();
+  const qa = getEgoQA();
+  if(state.ego.answers.length<ec) return false;
+  for(let i=0;i<ec;i++){
+    if(state.ego.answers[i]==null || !qa[i]) return false;
+  }
+  return true;
+}
+
+/* E.G.O 拼点信息：不属于任何卡组，使用哪个攻击模式属性取决于临场状态，因此不指定具体 gid */
+function getEgoClashInfo(){
+  const chosen = state.attackModes.filter(Boolean).map(k=>`${ATTACK_MODES[k].attr}(${ATTACK_MODES[k].label})`);
+  const attrText = chosen.length ? chosen.join(" / ") : "当前攻击模式对应属性";
+  return {
+    formula:`拼点值 = 1D6 + ${attrText} + 拼点修正（沿用发动时所处的攻击模式）`,
+    dmg:`伤害 = 基础伤害 + (我方拼点值 - 对方拼点值)`,
+    noDefDmg:`无防御卡：攻击自动命中，防御方拼点值 = 灵巧与体魄中较高者；伤害 = 基础伤害 + (我方拼点值 - 防御方拼点值)，差值最低为0`
+  };
+}
+
+/* 汇总 E.G.O 的完整可读数据，供总览页/JSON导出/图片导出统一复用 */
+function buildEgoExport(){
+  const sin = egoSin();
+  const type = state.ego.type;
+  const ec = egoEffectCount();
+  const qa = getEgoQA();
+  const qaResolved = [];
+  for(let i=0;i<ec;i++){
+    const ai = state.ego.answers[i];
+    if(ai!=null && qa[i]?.options?.[ai]){
+      qaResolved.push({question:qa[i].question, label:qa[i].options[ai].label, effect:qa[i].options[ai].effect});
+    }
+  }
+  return {
+    name: state.ego.name,
+    sin, sinLabel: sin?SIN_LABELS[sin]:null,
+    grade: EGO_GRADE,
+    type, typeLabel: type?EGO_TYPES[type].label:null,
+    effectCount: ec,
+    shardCap: egoShardCap(),
+    shardCost: egoShardCost(),
+    corrosionDC: egoCorrosionDC(),
+    baseEffect: type?EGO_TYPE_BASE[type]:null,
+    sinEffect: getEgoSinEffect(),
+    qa: qaResolved,
+    description: state.ego.description
+  };
+}
+
 function defaultSinProfile(){
   return {
     values:{wrath:0,lust:0,sloth:0,gluttony:0,gloom:0,pride:0,envy:0},
@@ -653,11 +796,16 @@ function defaultSinProfile(){
   };
 }
 
+function defaultEgoProfile(){
+  return { name:"", type:null, answers:[], description:"" };
+}
+
 const state = {
   name:"",
   gender:"",
   attrs:{力量:1,灵巧:1,体魄:1,认知:1,意志:1,共感:1},
   sins: defaultSinProfile(),
+  ego: defaultEgoProfile(),
   attackModes:["",""],
   cardGroups:{a:{},b:{}},
 };
@@ -671,7 +819,7 @@ let cardSub = 0;
 const CARD_SUBSTEPS = ["卡片总览","A组特性","A组问答","B组特性","B组问答","卡片预览"];
 let cardGroupIdx = 0; // 特性/问答中当前罪孽索引
 
-const STEPS = ["前置信息","基础属性","衍生数值","罪孽倾向","攻击模式","罪孽卡片","总览与导出"];
+const STEPS = ["前置信息","基础属性","衍生数值","罪孽倾向","E.G.O","攻击模式","罪孽卡片","总览与导出"];
 let current = 0;
 
 /* ============ 派生计算 ============ */
@@ -685,9 +833,26 @@ const speedInfo = () => SPEED_TABLE[state.attrs.灵巧];
 /* 固定值（所有初始角色统一） */
 const ACTION_SLOTS = 1;        // 行动槽固定为 1
 
-/* 抵抗值：身体抵抗＝体魄，精神抵抗＝意志 */
-const bodyResist = () => state.attrs.体魄;
-const mindResist = () => state.attrs.意志;
+/* ============ E.G.O：派生计算（全部由既有数据推导，不单独存储） ============ */
+const EGO_GRADE = "ZAYIN"; // 车卡阶段固定档位，TETH/HE 属于成长解锁
+const egoSin = () => state.sins.coreSin;                 // 罪孽属性 = 核心罪孽
+const egoEffectCount = () => {
+  const s = state.attrs.共感 + state.attrs.意志;
+  return s<=3 ? 1 : s<=5 ? 2 : 3;
+};
+const egoShardCap = () => state.attrs.意志 + 2;
+const egoShardCost = () => 1;
+const egoCorrosionDC = () => 4 + egoEffectCount();
+
+/* 共感/意志变化后，截断超出新特效数量的已选问答（不静默丢弃——记录供 UI 提示） */
+let egoTruncatedNotice = false;
+function reconcileEgoProfile(){
+  const ec = egoEffectCount();
+  if(state.ego.answers.length > ec){
+    state.ego.answers.length = ec;
+    egoTruncatedNotice = true;
+  }
+}
 
 /* ============ 罪孽：纯逻辑（可独立测试） ============ */
 const sumSins = (values) => SIN_ORDER.reduce((a,k)=>a+(values[k]||0),0);
@@ -816,12 +981,12 @@ function getClashInfo(trait, gid){
   if(trait==="attack"){
     return {clash:true, formula:`拼点值 = 1D6 + ${modeAttr}(${modeLabel}) + 拼点修正`,
       dmg:`伤害 = 基础伤害 + (我方拼点值 - 对方拼点值)`,
-      noDefDmg:`无人防御：伤害 = 基础伤害 + ${modeAttr}`};
+      noDefDmg:`无防御卡：攻击自动命中，防御方拼点值 = 灵巧与体魄中较高者（不投骰）；伤害 = 基础伤害 + (我方拼点值 - 防御方拼点值)，差值最低为0`};
   }
   if(trait==="multiAttack"){
     return {clash:true, formula:`拼点值 = 1D6 + ${modeAttr}(${modeLabel}) + 拼点修正（两次分别结算）`,
       dmg:`伤害 = 基础伤害 + (我方拼点值 - 对方拼点值)`,
-      noDefDmg:`无人防御：伤害 = 基础伤害 + ${modeAttr}`};
+      noDefDmg:`无防御卡：攻击自动命中，防御方拼点值 = 灵巧与体魄中较高者（不投骰）；伤害 = 基础伤害 + (我方拼点值 - 防御方拼点值)，差值最低为0`};
   }
   if(trait==="defense"){
     return {clash:true, formula:`拼点值 = 1D6 + 灵巧(闪避)/体魄(格挡) + 拼点修正`,
@@ -886,8 +1051,9 @@ function canLeave(step){
   if(step===0) return state.name.trim()!=="" && state.gender!=="";
   if(step===1) return validateAttrs().ok;
   if(step===3) return validateSinProfile(state.sins).isValid;
-  if(step===4) return state.attackModes[0]!=="" && state.attackModes[1]!=="";
-  if(step===5) return validateCardGroup("a").isValid && validateCardGroup("b").isValid;
+  if(step===4) return validateEgoProfile();
+  if(step===5) return state.attackModes[0]!=="" && state.attackModes[1]!=="";
+  if(step===6) return validateCardGroup("a").isValid && validateCardGroup("b").isValid;
   return true;
 }
 
@@ -949,8 +1115,8 @@ function renderChips(){
     const reachable = i<=current || (i===current+1 && canLeave(current));
     if(!reachable && i>current) c.classList.add("locked");
     c.onclick=()=>{
-      if(i<=current){ if(i===3) sinSub=Math.min(sinSub,SIN_SUBSTEPS.length-1); if(i===5) cardSub=Math.min(cardSub,CARD_SUBSTEPS.length-1); current=i; render(); }
-      else if(i===current+1 && canLeave(current)){ current=i; if(i===3) sinSub=0; if(i===5) cardSub=0; render(); }
+      if(i<=current){ if(i===3) sinSub=Math.min(sinSub,SIN_SUBSTEPS.length-1); if(i===6) cardSub=Math.min(cardSub,CARD_SUBSTEPS.length-1); current=i; render(); }
+      else if(i===current+1 && canLeave(current)){ current=i; if(i===3) sinSub=0; if(i===6) cardSub=0; render(); }
     };
     stepChips.appendChild(c);
   });
@@ -962,8 +1128,9 @@ function render(){
   else if(current===1) renderStep1();
   else if(current===2) renderStep2();
   else if(current===3) renderSinStep();
-  else if(current===4) renderAttackMode();
-  else if(current===5) renderCardStep();
+  else if(current===4) renderEgoStep();
+  else if(current===5) renderAttackMode();
+  else if(current===6) renderCardStep();
   else renderStep3();
   renderNav();
   renderSummary();
@@ -985,7 +1152,7 @@ function renderNav(){
     const last=sinSub===SIN_SUBSTEPS.length-1;
     btnNext.disabled=!canLeaveSinSub(sinSub);
     btnNext.textContent = last ? "确认罪孽档案 →" : "下一步 →";
-  }else if(current===5){
+  }else if(current===6){
     // 罪孽卡片模块内部子步骤推进
     const last=cardSub===CARD_SUBSTEPS.length-1;
     btnNext.disabled=!canLeaveCardSub(cardSub);
@@ -1087,6 +1254,7 @@ function renderStep1(){
 function setAttr(key,newVal){
   newVal=Math.max(1,Math.min(4,newVal)); // 初始硬性上限 4，下限 1
   state.attrs[key]=newVal;
+  reconcileEgoProfile();
   renderStep1(); renderNav(); renderSummary(); renderChips();
 }
 
@@ -1137,22 +1305,14 @@ function renderStep2(){
         <div class="v">${ACTION_SLOTS}</div>
         <div class="note">所有初始角色固定拥有 1 个行动槽</div>
       </div>
-      <div class="stat">
-        <div class="k">身体抵抗</div>
-        <div class="v">${bodyResist()}</div>
-        <div class="note">等于体魄(${state.attrs.体魄})</div>
-      </div>
-      <div class="stat">
-        <div class="k">精神抵抗</div>
-        <div class="v">${mindResist()}</div>
-        <div class="note">等于意志(${state.attrs.意志})</div>
-      </div>
     </div>
     <div class="attr-help" style="margin-top:18px">
-      <b>混乱规则：</b> 每名角色拥有两条混乱线。当当前生命值第一次降至对应数值或以下时进入混乱；每条混乱线每场战斗只触发一次。
-      <br>· 第一混乱线触发：所有拼点骰 -1，持续至本场战斗结束
-      <br>· 第二混乱线触发：所有拼点骰 -2；意志恐慌判定 1D6+意志≥7 保持理智
-      <br><b>意志的作用：</b> 意志影响恐慌判定、精神攻击抵抗、E.G.O 侵蚀判定以及面对创伤时的稳定性。高意志角色更不容易失控。
+      <b>混乱线：</b> 混乱线是随当前 HP 实时判定的状态，而非一次性触发的效果。
+      <br>· 当前 HP ≤ 第一混乱线 → 所有拼点骰 -1
+      <br>· 当前 HP ≤ 第二混乱线 → 所有拼点骰 -2（不与上一条叠加）
+      <br>· HP 被治疗回到线上时，惩罚立即解除
+      <br>· 恐慌判定：首次跌破第二混乱线时，进行 1D6＋意志 ≥ 7 的判定，失败则本回合由 GM 接管；每场战斗只判定一次
+      <br><b>意志的作用：</b> 恐慌判定、E.G.O 侵蚀判定、创伤稳定性。本游戏只有一种伤害，所有伤害都先扣临时生命、再扣 HP，不存在无视临时生命的伤害类型，也不存在任何减伤检定。
     </div>
   `;
 }
@@ -1368,7 +1528,143 @@ function renderSinProfilePreview(body){
   };
 }
 
-/* -------- 步骤 4：攻击模式选择 -------- */
+/* -------- 步骤 4：E.G.O -------- */
+function renderEgoStep(){
+  const sin = egoSin();
+  if(!sin){
+    stageCard.innerHTML=`
+      <h2>E.G.O</h2>
+      <div class="attr-help">
+        <b>尚未确定核心罪孽。</b> E.G.O 的罪孽属性直接等于核心罪孽，请先回到「罪孽倾向」完成点数分配。
+      </div>
+      <div class="export-row"><button class="btn primary" id="egoGotoSin">前往罪孽倾向 →</button></div>
+    `;
+    document.getElementById("egoGotoSin").onclick=()=>{ current=3; render(); };
+    return;
+  }
+
+  const ego = state.ego;
+  const ec = egoEffectCount();
+  const dc = egoCorrosionDC();
+  const cap = egoShardCap();
+  const sinEffect = getEgoSinEffect();
+  const qa = getEgoQA();
+
+  const typeCards = Object.keys(EGO_TYPES).map(t=>{
+    const md = EGO_TYPES[t];
+    const selected = ego.type===t;
+    return `<div class="mode-card${selected?" sel":""}" data-type="${t}">
+      <div class="mode-name">${md.label}</div>
+      <div class="mode-desc">${EGO_TYPE_BASE[t]}</div>
+      ${selected?'<span class="pill core">已选</span>':''}
+    </div>`;
+  }).join("");
+
+  let baseHtml = "";
+  if(ego.type){
+    const clashInfo = EGO_TYPES[ego.type].clash ? getEgoClashInfo() : null;
+    baseHtml = `<div class="sheet"><div class="sin-card preview-card">
+      <h4>基础功能（ZAYIN 档）</h4>
+      <p class="sin-summary">${EGO_TYPE_BASE[ego.type]}</p>
+      ${clashInfo?`<div class="card-clash"><span class="pill core">拼点</span> ${clashInfo.formula}<br><span class="card-dmg">${clashInfo.dmg}</span><br><span class="card-dmg">${clashInfo.noDefDmg}</span></div>`:`<div class="card-clash"><span class="pill rej">不拼点</span> 打出即生效</div>`}
+      ${sinEffect?`<p class="sin-summary" style="margin-top:10px"><b>罪孽专属特效 · ${sinEffect.label}</b>——${sinEffect.effect}</p>`:''}
+    </div></div>`;
+  }
+
+  let qaHtml = "";
+  if(ego.type){
+    if(egoTruncatedNotice){
+      qaHtml += `<div class="warn" style="margin-bottom:14px">✕ <span>共感/意志下降导致特效数量减少，多余的问答已清空，请重新选择。</span></div>`;
+    }
+    qaHtml += qa.slice(0, ec).map((q,qi)=>{
+      const selectedO = ego.answers[qi];
+      const optsHtml = q.options.map((o,oi)=>`
+        <div class="qa-option${selectedO===oi?" sel":""}" data-q="${qi}" data-o="${oi}">
+          <div class="qa-opt-label">${String.fromCharCode(65+oi)}. ${o.label}</div>
+          <div class="qa-opt-effect">${o.effect}</div>
+        </div>
+      `).join("");
+      return `<div class="qa-block">
+        <div class="qa-question">问题 ${qi+1}：${q.question}</div>
+        <div class="qa-options">${optsHtml}</div>
+      </div>`;
+    }).join("");
+  }
+
+  stageCard.innerHTML=`
+    <h2>E.G.O</h2>
+    <p class="lead">每名角色只能持有一个 E.G.O。罪孽属性、等级、特效数量、碎片消耗、侵蚀阈值、碎片承载上限均由已有数据自动推导。</p>
+    <div class="grid2">
+      <div class="stat">
+        <div class="k">罪孽属性</div>
+        <div class="v" style="font-size:18px"><span class="sin-icon-inline">${sinIcon(sin)}</span>${SIN_LABELS[sin]}</div>
+        <div class="note">＝ 核心罪孽，自动派生</div>
+      </div>
+      <div class="stat">
+        <div class="k">等级</div>
+        <div class="v" style="font-size:18px"><span class="pill core">ZAYIN</span> <span class="pill rej">TETH 成长解锁</span> <span class="pill rej">HE 成长解锁</span></div>
+        <div class="note">车卡阶段固定 ZAYIN</div>
+      </div>
+      <div class="stat">
+        <div class="k">特效数量</div>
+        <div class="v">${ec}</div>
+        <div class="note">共感 ${state.attrs.共感} ＋ 意志 ${state.attrs.意志} ＝ ${state.attrs.共感+state.attrs.意志}</div>
+      </div>
+      <div class="stat">
+        <div class="k">碎片消耗 / 侵蚀阈值</div>
+        <div class="v">${egoShardCost()} / ${dc}</div>
+        <div class="note">侵蚀阈值 ＝ 4 ＋ 特效数量(${ec})</div>
+      </div>
+      <div class="stat">
+        <div class="k">碎片承载上限</div>
+        <div class="v">${cap}</div>
+        <div class="note">＝ 意志(${state.attrs.意志}) ＋ 2</div>
+      </div>
+    </div>
+
+    <label class="field" style="margin-top:18px">
+      <span class="lab">E.G.O 名称</span>
+      <input type="text" id="egoName" placeholder="为你的 E.G.O 取一个名字" value="${escapeHtml(ego.name)}">
+    </label>
+
+    <h4 class="sin-sub-h">类型</h4>
+    <div class="mode-grid" id="egoTypeGrid">${typeCards}</div>
+
+    ${baseHtml}
+    ${ego.type?`<div class="sheet"><h4>问答特效</h4>${qaHtml||'<p class="hint">该类型暂无问答。</p>'}</div>`:''}
+
+    <label class="field" style="margin-top:6px">
+      <span class="lab">显现描述（选填，纯文本，无机制意义）</span>
+      <input type="text" id="egoDesc" placeholder="描述 E.G.O 显现时的样貌与氛围" value="${escapeHtml(ego.description)}">
+    </label>
+  `;
+
+  document.getElementById("egoName").oninput=e=>{ state.ego.name=e.target.value; renderNav(); renderSummary(); renderChips(); };
+  document.getElementById("egoDesc").oninput=e=>{ state.ego.description=e.target.value; };
+
+  document.getElementById("egoTypeGrid").querySelectorAll(".mode-card").forEach(card=>{
+    card.onclick=()=>{
+      const t=card.dataset.type;
+      if(t===ego.type) return;
+      if(ego.answers.length>0 && !confirm("切换类型会清空已选的问答，确定吗？")) return;
+      ego.type=t;
+      ego.answers=[];
+      render();
+    };
+  });
+
+  stageCard.querySelectorAll(".qa-option").forEach(el=>{
+    el.onclick=()=>{
+      const qi=parseInt(el.dataset.q,10);
+      const oi=parseInt(el.dataset.o,10);
+      state.ego.answers[qi]=oi;
+      egoTruncatedNotice=false;
+      render();
+    };
+  });
+}
+
+/* -------- 步骤 5：攻击模式选择 -------- */
 function renderAttackMode(){
   const m=state.attackModes;
   const modeKeys=Object.keys(ATTACK_MODES);
@@ -1421,7 +1717,7 @@ function renderAttackMode(){
   });
 }
 
-/* -------- 步骤 5：罪孽卡片 -------- */
+/* -------- 步骤 6：罪孽卡片 -------- */
 function renderCardStep(){
   const sub=cardSub;
   const subChips=CARD_SUBSTEPS.map((s,i)=>{
@@ -1718,7 +2014,7 @@ function renderCardPreview(body){
   };
 }
 
-/* -------- 步骤 6：总览与导出 -------- */
+/* -------- 步骤 7：总览与导出 -------- */
 function renderStep3(){
   const sp=speedInfo();
   const attrRows=ATTR_DEFS.map(d=>`<td>${d.key}</td><td>${state.attrs[d.key]} <span style="color:var(--muted)">· ${LEVEL_MEANING[state.attrs[d.key]]}</span></td>`).map(r=>`<tr>${r}</tr>`).join("");
@@ -1779,7 +2075,6 @@ function renderStep3(){
         <tr><td>混乱线</td><td>${panic1()} / ${panic2()}</td></tr>
         <tr><td>速度范围</td><td>${sp.range} · ${sp.dice}</td></tr>
         <tr><td>行动槽</td><td>${ACTION_SLOTS}</td></tr>
-        <tr><td>身体抵抗 / 精神抵抗</td><td>${bodyResist()} / ${mindResist()}</td></tr>
       </table>
     </div>
     <div class="sheet">
@@ -1790,6 +2085,29 @@ function renderStep3(){
         <tr><td>排斥罪孽</td><td>${(state.sins.rejectedSins&&state.sins.rejectedSins.length)?state.sins.rejectedSins.map(k=>SIN_LABELS[k]).join("、"):'—'}</td></tr>
         <tr><td>初始罪孽压力</td><td>${state.sins.sinPressure} / 3</td></tr>
       </table>
+    </div>
+    <div class="sheet">
+      ${(()=>{
+        const eg=buildEgoExport();
+        if(!eg.sin) return `<h4>E.G.O</h4><p class="hint">尚未确定核心罪孽，无法创建 E.G.O。</p>`;
+        if(!eg.type) return `<h4>E.G.O</h4><p class="hint">尚未创建 E.G.O，请前往「E.G.O」步骤完成类型与问答选择。</p>`;
+        const qaRows=eg.qa.map((q,i)=>`<tr><td>问${i+1}</td><td>${q.question}</td><td>${q.label}——${q.effect}</td></tr>`).join("");
+        return `<h4>E.G.O</h4>
+        <table class="sh">
+          <tr><td>名称</td><td>${escapeHtml(eg.name)||'<span style="color:var(--danger)">未填写</span>'}</td></tr>
+          <tr><td>罪孽属性</td><td><span class="sin-icon-inline">${sinIcon(eg.sin)}</span>${eg.sinLabel}</td></tr>
+          <tr><td>等级</td><td>${eg.grade}</td></tr>
+          <tr><td>类型</td><td>${eg.typeLabel}</td></tr>
+          <tr><td>共感 ＋ 意志 ＝ 特效数量</td><td>${state.attrs.共感} ＋ ${state.attrs.意志} ＝ ${eg.effectCount}</td></tr>
+          <tr><td>碎片消耗 / 侵蚀阈值</td><td>${eg.shardCost} / ${eg.corrosionDC}</td></tr>
+          <tr><td>碎片承载上限</td><td>${eg.shardCap}</td></tr>
+          <tr><td>当前碎片</td><td>＿＿＿（战斗中手动填写）</td></tr>
+          <tr><td>基础功能</td><td>${eg.baseEffect}</td></tr>
+          <tr><td>罪孽专属特效</td><td>${eg.sinEffect?`${eg.sinEffect.label}——${eg.sinEffect.effect}`:'—'}</td></tr>
+        </table>
+        <table class="sh" style="margin-top:8px">${qaRows}</table>
+        <table class="sh" style="margin-top:8px"><tr><td>显现描述</td><td>${escapeHtml(eg.description)||'—'}</td></tr></table>`;
+      })()}
     </div>
     <div class="sheet">
       <h4>攻击模式</h4>
@@ -1817,6 +2135,7 @@ function renderStep3(){
       state.name="";state.gender="";
       ATTR_DEFS.forEach(d=>state.attrs[d.key]=1);
       state.sins=defaultSinProfile();
+      state.ego=defaultEgoProfile();
       state.attackModes=["",""];state.cardGroups={a:{},b:{}};
       sinSub=0; sinReaderIdx=0; cardSub=0; cardGroupIdx=0;
       current=0; render();
@@ -1839,12 +2158,13 @@ function renderSummary(){
     <div class="srow editable" data-goto="2"><span class="sk">生命值</span><span class="sv">${maxHP()}</span></div>
     <div class="srow editable" data-goto="2"><span class="sk">混乱线</span><span class="sv">${panic1()} / ${panic2()}</span></div>
     <div class="srow editable" data-goto="2"><span class="sk">速度</span><span class="sv">${sp.range} · ${sp.dice}</span></div>
-    <div class="srow editable" data-goto="2"><span class="sk">抵抗(身/精)</span><span class="sv">${bodyResist()} / ${mindResist()}</span></div>
     <div style="height:10px"></div>
     <div class="srow editable" data-goto="3"><span class="sk">核心罪孽</span><span class="sv">${sinName(state.sins.coreSin)}</span></div>
     <div class="srow editable" data-goto="3"><span class="sk">排斥罪孽</span><span class="sv">${(state.sins.rejectedSins&&state.sins.rejectedSins.length)?state.sins.rejectedSins.map(k=>SIN_LABELS[k]).join("、"):'—'}</span></div>
     <div style="height:10px"></div>
-    <div class="srow editable" data-goto="4"><span class="sk">攻击模式</span><span class="sv">${modeA} / ${modeB}</span></div>
+    <div class="srow editable" data-goto="4"><span class="sk">E.G.O</span><span class="sv">${state.ego.type?(escapeHtml(state.ego.name)||'（未命名）')+" · "+EGO_TYPES[state.ego.type].label:'未创建'}</span></div>
+    <div style="height:10px"></div>
+    <div class="srow editable" data-goto="5"><span class="sk">攻击模式</span><span class="sv">${modeA} / ${modeB}</span></div>
   `;
   sideSummary.querySelectorAll(".editable").forEach(el=>{
     el.onclick=()=>{
@@ -1868,9 +2188,7 @@ function buildData(){
       第二混乱线:panic2(),
       速度范围:sp.range,
       速度投掷:sp.dice,
-      行动槽:ACTION_SLOTS,
-      身体抵抗:bodyResist(),
-      精神抵抗:mindResist()
+      行动槽:ACTION_SLOTS
     },
     // 罪孽数据
     sins:{
@@ -1879,6 +2197,8 @@ function buildData(){
       rejectedSins:[...(state.sins.rejectedSins||[])],
       sinPressure:state.sins.sinPressure
     },
+    // E.G.O 数据
+    ego: buildEgoExport(),
     攻击模式:{a:state.attackModes[0],b:state.attackModes[1]},
     罪孽卡片:{a:buildCardGroupExport("a"),b:buildCardGroupExport("b")}
   };
@@ -1952,7 +2272,6 @@ function exportImage(){
   line("混乱线", panic1()+" / "+panic2());
   line("速度", sp.range+" · "+sp.dice);
   line("行动槽", String(ACTION_SLOTS));
-  line("身体 / 精神抵抗", bodyResist()+" / "+mindResist());
   y+=12;
 
   // 多行文本换行工具
@@ -1974,6 +2293,29 @@ function exportImage(){
   line("核心罪孽", sinName(p.coreSin));
   wrap("排斥罪孽", (p.rejectedSins&&p.rejectedSins.length)?p.rejectedSins.map(k=>SIN_LABELS[k]).join("、"):"—");
   line("初始罪孽压力", p.sinPressure+" / 3");
+  y+=12;
+
+  // E.G.O
+  const eg=buildEgoExport();
+  label("E.G.O");
+  if(!eg.sin){
+    ctx.fillStyle="#9096a6";ctx.font="14px 'Microsoft YaHei',sans-serif";
+    ctx.fillText("尚未确定核心罪孽，无法创建 E.G.O",64,y); y+=30;
+  }else if(!eg.type){
+    ctx.fillStyle="#9096a6";ctx.font="14px 'Microsoft YaHei',sans-serif";
+    ctx.fillText("尚未创建 E.G.O",64,y); y+=30;
+  }else{
+    line("名称", eg.name||"—");
+    line("罪孽属性 / 等级", eg.sinLabel+" / "+eg.grade);
+    line("类型", eg.typeLabel);
+    line("共感＋意志＝特效数量", state.attrs.共感+"＋"+state.attrs.意志+"＝"+eg.effectCount);
+    line("碎片消耗 / 侵蚀阈值", eg.shardCost+" / "+eg.corrosionDC);
+    line("碎片承载上限", String(eg.shardCap));
+    wrap("基础功能", eg.baseEffect);
+    if(eg.sinEffect) wrap("罪孽专属特效", eg.sinEffect.label+"——"+eg.sinEffect.effect);
+    eg.qa.forEach((q,i)=>{ wrap("问"+(i+1), q.label+"——"+q.effect); });
+    wrap("显现描述", eg.description||"—");
+  }
   y+=12;
 
   // 攻击模式
@@ -2062,12 +2404,68 @@ function exportImage(){
 function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
 const sinName = (k) => k?SIN_LABELS[k]:"—";
 
+/* ============ 存档迁移：已废弃的技能选项 ============ */
+/* 规则更新后文案/数值被替换的选项（sin, trait, level, 问题序号q, 选项序号o）。
+   选项字母(A/B/C)的位置未变，仅内容被替换，因此用 q/o 索引定位。
+   旧存档若命中以下组合，视为引用了已废弃的选项，读档时清空该问答并提示用户重选。 */
+const DEPRECATED_OPTIONS = [
+  {sin:"wrath", trait:"attack", level:"large", q:0, o:2},
+  {sin:"gloom", trait:"attack", level:"small", q:0, o:2},
+  {sin:"gloom", trait:"attack", level:"large", q:0, o:2},
+  {sin:"gloom", trait:"attack", level:"large", q:2, o:1},
+  {sin:"gloom", trait:"debuff", level:"small", q:0, o:0},
+  {sin:"gloom", trait:"debuff", level:"small", q:0, o:1},
+  {sin:"gloom", trait:"debuff", level:"small", q:1, o:0},
+  {sin:"gloom", trait:"debuff", level:"small", q:1, o:1},
+  {sin:"gloom", trait:"debuff", level:"small", q:1, o:2},
+  {sin:"gloom", trait:"debuff", level:"large", q:0, o:0},
+  {sin:"gloom", trait:"debuff", level:"large", q:0, o:1},
+  {sin:"gloom", trait:"debuff", level:"large", q:1, o:0},
+  {sin:"gloom", trait:"debuff", level:"large", q:1, o:1},
+  {sin:"gloom", trait:"debuff", level:"large", q:1, o:2},
+  {sin:"gloom", trait:"debuff", level:"large", q:2, o:0},
+  {sin:"gloom", trait:"debuff", level:"large", q:2, o:1},
+  {sin:"pride", trait:"attack", level:"small", q:0, o:1},
+  {sin:"pride", trait:"attack", level:"large", q:0, o:1},
+  {sin:"envy", trait:"attack", level:"small", q:0, o:0},
+  {sin:"envy", trait:"attack", level:"small", q:1, o:1},
+  {sin:"envy", trait:"attack", level:"large", q:0, o:0},
+  {sin:"envy", trait:"attack", level:"large", q:1, o:1},
+  {sin:"envy", trait:"defense", level:"large", q:2, o:0},
+  {sin:"envy", trait:"support", level:"small", q:1, o:1},
+  {sin:"envy", trait:"support", level:"large", q:1, o:1},
+];
+
+/* 扫描两组卡片，清空命中已废弃选项的问答（不静默丢弃——记录下来供加载后提示） */
+let deprecatedCardNotices = [];
+function migrateDeprecatedCardAnswers(){
+  deprecatedCardNotices = [];
+  for(const gid of ["a","b"]){
+    const g = state.cardGroups[gid];
+    for(const sinKey of SIN_ORDER){
+      const entry = g[sinKey];
+      if(!entry || !entry.trait || !Array.isArray(entry.answers)) continue;
+      const val = state.sins.values[sinKey];
+      const level = val>=3?"large":val>=2?"small":"basic";
+      DEPRECATED_OPTIONS
+        .filter(d=>d.sin===sinKey && d.trait===entry.trait && d.level===level)
+        .forEach(d=>{
+          if(entry.answers[d.q]===d.o){
+            entry.answers[d.q]=null;
+            deprecatedCardNotices.push(`${gid==="a"?"A组":"B组"} · ${SIN_LABELS[sinKey]}·${TRAIT_LABELS[entry.trait]}·问题${d.q+1}`);
+          }
+        });
+    }
+  }
+}
+
 /* ============ 本地存储 ============ */
 const STORAGE_KEY = "limbus-trpg-character";
 function saveState(){
   try{
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       name:state.name, gender:state.gender, attrs:state.attrs, sins:state.sins,
+      ego:state.ego,
       attackModes:state.attackModes, cardGroups:state.cardGroups,
       _ui:{current, sinSub, sinReaderIdx, cardSub, cardGroupIdx}
     }));
@@ -2092,9 +2490,16 @@ function loadState(){
       if(maxed.length>1) state.sins.values[maxed[1]]=SIN_MAX-1;
       reconcileSinProfile();
     }
+    // E.G.O：旧存档没有该字段时得到全新的默认档案（type:null），
+    // 视为"尚未创建"，由 validateEgoProfile() 引导用户在 E.G.O 步骤补建，不报错、不静默丢弃。
+    state.ego = Object.assign(defaultEgoProfile(), d.ego||{});
+    if(state.ego.type && !EGO_TYPES[state.ego.type]){ state.ego.type=null; state.ego.answers=[]; }
+    if(!Array.isArray(state.ego.answers)) state.ego.answers=[];
+    reconcileEgoProfile();
     if(d.attackModes) state.attackModes=d.attackModes;
     if(d.cardGroups) state.cardGroups=d.cardGroups;
     reconcileCardGroups();
+    migrateDeprecatedCardAnswers();
     if(d._ui){
       current=d._ui.current||0;
       sinSub=d._ui.sinSub||0;
@@ -2115,8 +2520,8 @@ function toast(msg){
 /* ============ 导航按钮 ============ */
 btnBack.onclick=()=>{
   if(current===3 && sinSub>0){ sinSub--; render(); return; }
-  if(current===5 && cardSub>0){ cardSub--; render(); return; }
-  if(current>0){ current--; if(current===3) sinSub=SIN_SUBSTEPS.length-1; if(current===5) cardSub=CARD_SUBSTEPS.length-1; render(); }
+  if(current===6 && cardSub>0){ cardSub--; render(); return; }
+  if(current>0){ current--; if(current===3) sinSub=SIN_SUBSTEPS.length-1; if(current===6) cardSub=CARD_SUBSTEPS.length-1; render(); }
 };
 btnNext.onclick=()=>{
   if(current===3){
@@ -2125,17 +2530,17 @@ btnNext.onclick=()=>{
     if(!canLeave(3)){ toast("罪孽档案尚未完成"); return; }
     current++; render(); return;
   }
-  if(current===5){
+  if(current===6){
     if(!canLeaveCardSub(cardSub)){ toast("请先完成当前步骤"); return; }
     if(cardSub<CARD_SUBSTEPS.length-1){ cardSub++; render(); return; }
-    if(!canLeave(5)){ toast("卡片配置尚未完成"); return; }
+    if(!canLeave(6)){ toast("卡片配置尚未完成"); return; }
     current++; render(); return;
   }
   if(!canLeave(current)){ toast("请先完成当前步骤"); return; }
   if(current<STEPS.length-1){
     current++;
     if(current===3) sinSub=0;
-    if(current===5) cardSub=0;
+    if(current===6) cardSub=0;
     render();
   }
 };
@@ -2143,3 +2548,9 @@ btnNext.onclick=()=>{
 /* 启动 */
 loadState();
 render();
+if(deprecatedCardNotices.length){
+  alert(
+    "检测到旧存档中以下技能问答引用了已随规则更新废弃的选项，已重置为待选，请前往「罪孽卡片」步骤重新选择：\n\n"
+    + deprecatedCardNotices.join("\n")
+  );
+}
