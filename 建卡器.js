@@ -1764,7 +1764,7 @@ function renderCardOverview(body){
     </div>
     <div class="sheet">
       <h4>罪孽卡片一览</h4>
-      <table class="sh">
+      <table class="sh auto">
         <tr><td style="color:var(--muted)">罪孽</td><td style="color:var(--muted)">等级</td><td style="color:var(--muted)">卡片类型</td><td style="color:var(--muted)">可用特性</td></tr>
         ${rows}
       </table>
@@ -1840,7 +1840,14 @@ function renderCardTraitSelect(body,gid){
   });
   const pv=document.getElementById("traitPrev"); if(pv) pv.onclick=()=>{cardGroupIdx--;render();};
   const nx=document.getElementById("traitNext"); if(nx) nx.onclick=()=>{if(!nx.disabled){cardGroupIdx++;render();}};
-  const dn=document.getElementById("traitDone"); if(dn) dn.onclick=()=>{if(!dn.disabled){cardGroupIdx=0;render();}};
+  const dn=document.getElementById("traitDone");
+  if(dn) dn.onclick=()=>{
+    if(dn.disabled) return;
+    // 仍有罪孽没选特性时跳到第一个未完成项并说明原因，而不是默默回到第一张
+    const miss=activeSins.findIndex(k=>!g[k]||!g[k].trait);
+    if(miss>=0){ cardGroupIdx=miss; render(); toast(`「${SIN_LABELS[activeSins[miss]]}」尚未选择特性`); return; }
+    cardGroupIdx=0; cardSub++; render();   // 推进到本组问答
+  };
 }
 
 /* --- 子步骤2/4：技能问答 --- */
@@ -1928,7 +1935,20 @@ function renderCardQA(body,gid){
   });
   const pv=document.getElementById("qaPrev"); if(pv) pv.onclick=()=>{cardGroupIdx--;render();};
   const nx=document.getElementById("qaNext"); if(nx) nx.onclick=()=>{cardGroupIdx++;render();};
-  const dn=document.getElementById("qaDone"); if(dn) dn.onclick=()=>{cardGroupIdx=0;render();};
+  const dn=document.getElementById("qaDone");
+  if(dn) dn.onclick=()=>{
+    // 仍有问答没答完时跳到第一个未完成项并说明原因，而不是默默回到第一张
+    const miss=qaSins.findIndex(k=>{
+      const e=g[k]||{};
+      if(!e.trait) return true;
+      const lv=state.sins.values[k]>=3?"large":"small";
+      const exp=getSinQA(k,e.trait,lv).length;
+      const ans=e.answers||[];
+      return ans.length<exp || ans.some(a=>a==null);
+    });
+    if(miss>=0){ cardGroupIdx=miss; render(); toast(`「${SIN_LABELS[qaSins[miss]]}」的问答尚未完成`); return; }
+    cardGroupIdx=0; cardSub++; render();   // 推进到下一子步骤
+  };
 }
 
 /* --- 子步骤5：卡片预览 --- */
@@ -2050,9 +2070,9 @@ function renderStep3(){
         if(clashInfo.dmg) clashDetail+=`<br><span style="color:var(--accent-2);font-size:12px">${clashInfo.dmg}</span>`;
         if(clashInfo.noDefDmg) clashDetail+=`<br><span style="color:var(--accent-2);font-size:12px">${clashInfo.noDefDmg}</span>`;
       }
-      return `<tr><td><span class="sin-icon-inline">${sinIcon(k)}</span>${SIN_LABELS[k]}</td><td>${levelText}</td><td>${traitText} ${clashTag}</td><td>${effectLines||'—'}${clashDetail}</td></tr>`;
+      return `<tr><td class="c-sin"><span class="sin-icon-inline">${sinIcon(k)}</span>${SIN_LABELS[k]}</td><td class="c-lv">${levelText}</td><td class="c-tr">${traitText}${clashTag?`<br>${clashTag}`:''}</td><td>${effectLines||'—'}${clashDetail}</td></tr>`;
     }).join("");
-    return `<h4>${gid==="a"?"A":"B"}组 · ${modeLabel}模式（拼点属性：${modeAttr}）</h4><table class="sh"><tr><td style="color:var(--muted)">罪孽</td><td style="color:var(--muted)">等级</td><td style="color:var(--muted)">特性</td><td style="color:var(--muted)">效果</td></tr>${rows}</table>`;
+    return `<h4>${gid==="a"?"A":"B"}组 · ${modeLabel}模式（拼点属性：${modeAttr}）</h4><table class="cards"><tr class="thead"><td class="c-sin">罪孽</td><td class="c-lv">等级</td><td class="c-tr">特性</td><td>效果</td></tr>${rows}</table>`;
   };
   stageCard.innerHTML=`
     <h2>总览与导出</h2>
