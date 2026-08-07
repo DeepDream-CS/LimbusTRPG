@@ -2215,95 +2215,121 @@ function exportJSON(){
   toast("已导出 JSON");
 }
 
-function exportImage(){
-  const cv=document.getElementById("exportCanvas");
-  const ctx=cv.getContext("2d");
-  const W=cv.width, H=cv.height;
+/* ============ 图片导出 ============ */
+/* 字号只有三级：标题 / 子标题 / 正文，行高统一为 IMG_LH */
+const IMG_W        = 760;   // 画布宽度
+const IMG_M        = 48;    // 左右边距
+const IMG_LH       = 24;    // 统一行高
+const IMG_VAL_X    = 300;   // 键值行中「值」的起始 x
+const IMG_F_TITLE  = "bold 26px 'Microsoft YaHei',sans-serif";
+const IMG_F_LABEL  = "bold 19px 'Microsoft YaHei',sans-serif";
+const IMG_F_BODY   = "15px 'Microsoft YaHei',sans-serif";
+const IMG_F_BODY_B = "bold 15px 'Microsoft YaHei',sans-serif";
+const IMG_F_FOOT   = "13px 'Microsoft YaHei',sans-serif";
+
+/* 绘制角色卡。measure=true 时只推进 y、不落笔，用于先算出内容总高度。
+   两遍共用同一套折行逻辑，所以测得的高度与实际绘制高度严格一致。 */
+function paintSheet(ctx, H, measure){
+  const W=IMG_W, M=IMG_M, LH=IMG_LH;
   const sp=speedInfo();
+  let y=0;
+  const on=(fn)=>{ if(!measure) fn(); };
 
-  // 背景
-  const g=ctx.createLinearGradient(0,0,0,H);
-  g.addColorStop(0,"#1a1c26"); g.addColorStop(1,"#0a0b0f");
-  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
-  // 边框
-  ctx.strokeStyle="#c8a24b"; ctx.lineWidth=3; ctx.strokeRect(16,16,W-32,H-32);
-
-  let y=70;
+  if(!measure){
+    const bg=ctx.createLinearGradient(0,0,0,H);
+    bg.addColorStop(0,"#1a1c26"); bg.addColorStop(1,"#0a0b0f");
+    ctx.fillStyle=bg; ctx.fillRect(0,0,W,H);
+    ctx.strokeStyle="#c8a24b"; ctx.lineWidth=3; ctx.strokeRect(16,16,W-32,H-32);
+  }
   ctx.textBaseline="alphabetic";
-  ctx.fillStyle="#e6c76a";
-  ctx.font="bold 30px 'Microsoft YaHei',sans-serif";
-  ctx.fillText("Limbus Company TRPG · 角色卡", 48, y);
-  ctx.strokeStyle="#2a2e3a"; ctx.lineWidth=1;
-  ctx.beginPath(); ctx.moveTo(48,y+18); ctx.lineTo(W-48,y+18); ctx.stroke();
-  y+=60;
 
-  const label=(t)=>{ctx.fillStyle="#c8a24b";ctx.font="bold 20px 'Microsoft YaHei',sans-serif";ctx.fillText(t,48,y);y+=34;};
-  const line=(k,v)=>{
-    ctx.fillStyle="#9096a6";ctx.font="16px 'Microsoft YaHei',sans-serif";ctx.fillText(k,64,y);
-    ctx.fillStyle="#e8e9ee";ctx.font="bold 18px 'Microsoft YaHei',sans-serif";ctx.fillText(v,300,y);
-    y+=30;
+  /* 按可用宽度折行 */
+  const split=(text,font,maxW)=>{
+    ctx.font=font;
+    const s=String(text==null||text===""?"—":text);
+    const lines=[]; let cur="";
+    for(const ch of s){
+      if(cur!=="" && ctx.measureText(cur+ch).width>maxW){ lines.push(cur); cur=ch; }
+      else cur+=ch;
+    }
+    lines.push(cur);
+    return lines;
   };
+  const put=(lines,x,font,color)=>{
+    on(()=>{
+      ctx.font=font; ctx.fillStyle=color;
+      lines.forEach((t,i)=>ctx.fillText(t,x,y+i*LH));
+    });
+    y+=lines.length*LH;
+  };
+  /* 子标题 */
+  const label=(t)=>{
+    y+=10;
+    on(()=>{ ctx.font=IMG_F_LABEL; ctx.fillStyle="#c8a24b"; ctx.fillText(t,M,y); });
+    y+=LH+6;
+  };
+  /* 键值正文行，值超宽自动换行 */
+  const line=(k,v,color,font)=>{
+    const f=font||IMG_F_BODY;
+    const lines=split(v,f,W-M-IMG_VAL_X);
+    on(()=>{ ctx.font=IMG_F_BODY; ctx.fillStyle="#9096a6"; ctx.fillText(k,M+16,y); });
+    put(lines,IMG_VAL_X,f,color||"#e8e9ee");
+  };
+  /* 缩进正文行 */
+  const indent=(text,color)=>{
+    const x=M+36;
+    put(split(text,IMG_F_BODY,W-M-x),x,IMG_F_BODY,color||"#e8e9ee");
+  };
+
+  /* —— 标题 —— */
+  y=66;
+  on(()=>{
+    ctx.font=IMG_F_TITLE; ctx.fillStyle="#e6c76a";
+    ctx.fillText("Limbus Company TRPG · 角色卡",M,y);
+    ctx.strokeStyle="#2a2e3a"; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(M,y+18); ctx.lineTo(W-M,y+18); ctx.stroke();
+  });
+  y+=48;
 
   label("基本信息");
   line("角色名字", state.name||"—");
   line("性别", state.gender||"—");
-  y+=12;
 
   label("基础属性");
   ATTR_DEFS.forEach(d=>{
     const val=state.attrs[d.key];
-    ctx.fillStyle="#9096a6";ctx.font="16px 'Microsoft YaHei',sans-serif";
-    ctx.fillText(d.key,64,y);
-    // 圆点
-    for(let i=1;i<=5;i++){
-      ctx.beginPath();
-      ctx.arc(180+i*30, y-6, 9, 0, Math.PI*2);
-      if(i<=val){ctx.fillStyle="#c8a24b";ctx.fill();}
-      else{ctx.strokeStyle="#3a3e4a";ctx.lineWidth=1.5;ctx.stroke();}
-    }
-    ctx.fillStyle="#e6c76a";ctx.font="bold 18px 'Microsoft YaHei',sans-serif";
-    ctx.fillText(val+"  · "+LEVEL_MEANING[val], 350, y);
-    y+=32;
+    on(()=>{
+      ctx.font=IMG_F_BODY; ctx.fillStyle="#9096a6"; ctx.fillText(d.key,M+16,y);
+      for(let i=1;i<=5;i++){
+        ctx.beginPath(); ctx.arc(150+i*24, y-5, 8, 0, Math.PI*2);
+        if(i<=val){ ctx.fillStyle="#c8a24b"; ctx.fill(); }
+        else { ctx.strokeStyle="#3a3e4a"; ctx.lineWidth=1.5; ctx.stroke(); }
+      }
+      ctx.font=IMG_F_BODY; ctx.fillStyle="#e6c76a";
+      ctx.fillText(val+" · "+LEVEL_MEANING[val], IMG_VAL_X, y);
+    });
+    y+=LH+4;
   });
-  y+=12;
 
   label("衍生数值");
   line("最大生命值", String(maxHP()));
   line("混乱线", panic1()+" / "+panic2());
   line("速度", sp.range+" · "+sp.dice);
   line("行动槽", String(ACTION_SLOTS));
-  y+=12;
-
-  // 多行文本换行工具
-  const wrap=(k,v)=>{
-    ctx.fillStyle="#9096a6";ctx.font="16px 'Microsoft YaHei',sans-serif";ctx.fillText(k,64,y);
-    ctx.fillStyle="#e8e9ee";ctx.font="16px 'Microsoft YaHei',sans-serif";
-    const maxW=W-48-300; let lineTxt=""; const startY=y;
-    for(const ch of String(v||"—")){
-      if(ctx.measureText(lineTxt+ch).width>maxW){ ctx.fillText(lineTxt,300,y); y+=24; lineTxt=ch; }
-      else lineTxt+=ch;
-    }
-    ctx.fillText(lineTxt,300,y);
-    y=Math.max(y+30, startY+30);
-  };
 
   const p=state.sins;
   label("罪孽倾向");
-  line("罪孽数值", SIN_ORDER.map(k=>SIN_LABELS[k]+p.values[k]).join(" "));
+  line("罪孽数值", SIN_ORDER.map(k=>SIN_LABELS[k]+p.values[k]).join("  "));
   line("核心罪孽", sinName(p.coreSin));
-  wrap("排斥罪孽", (p.rejectedSins&&p.rejectedSins.length)?p.rejectedSins.map(k=>SIN_LABELS[k]).join("、"):"—");
+  line("排斥罪孽", (p.rejectedSins&&p.rejectedSins.length)?p.rejectedSins.map(k=>SIN_LABELS[k]).join("、"):"—");
   line("初始罪孽压力", p.sinPressure+" / 3");
-  y+=12;
 
-  // E.G.O
   const eg=buildEgoExport();
   label("E.G.O");
   if(!eg.sin){
-    ctx.fillStyle="#9096a6";ctx.font="14px 'Microsoft YaHei',sans-serif";
-    ctx.fillText("尚未确定核心罪孽，无法创建 E.G.O",64,y); y+=30;
+    indent("尚未确定核心罪孽，无法创建 E.G.O","#9096a6");
   }else if(!eg.type){
-    ctx.fillStyle="#9096a6";ctx.font="14px 'Microsoft YaHei',sans-serif";
-    ctx.fillText("尚未创建 E.G.O",64,y); y+=30;
+    indent("尚未创建 E.G.O","#9096a6");
   }else{
     line("名称", eg.name||"—");
     line("罪孽属性 / 等级", eg.sinLabel+" / "+eg.grade);
@@ -2311,23 +2337,17 @@ function exportImage(){
     line("共感＋意志＝特效数量", state.attrs.共感+"＋"+state.attrs.意志+"＝"+eg.effectCount);
     line("碎片消耗 / 侵蚀阈值", eg.shardCost+" / "+eg.corrosionDC);
     line("碎片承载上限", String(eg.shardCap));
-    wrap("基础功能", eg.baseEffect);
-    if(eg.sinEffect) wrap("罪孽专属特效", eg.sinEffect.label+"——"+eg.sinEffect.effect);
-    eg.qa.forEach((q,i)=>{ wrap("问"+(i+1), q.label+"——"+q.effect); });
-    wrap("显现描述", eg.description||"—");
+    line("基础功能", eg.baseEffect);
+    if(eg.sinEffect) line("罪孽专属特效", eg.sinEffect.label+"——"+eg.sinEffect.effect);
+    eg.qa.forEach((q,i)=>{ line("问"+(i+1), q.label+"——"+q.effect); });
+    line("显现描述", eg.description||"—");
   }
-  y+=12;
 
-  // 攻击模式
-  const modeA=state.attackModes[0]?ATTACK_MODES[state.attackModes[0]].label:"—";
-  const modeB=state.attackModes[1]?ATTACK_MODES[state.attackModes[1]].label:"—";
   label("攻击模式");
-  line("A 组", modeA);
-  line("B 组", modeB);
-  y+=12;
+  line("A 组", state.attackModes[0]?ATTACK_MODES[state.attackModes[0]].label:"—");
+  line("B 组", state.attackModes[1]?ATTACK_MODES[state.attackModes[1]].label:"—");
 
-  // 卡片组详览
-  const mkGroupLines=(gid)=>{
+  const groupBlock=(gid)=>{
     const g=state.cardGroups[gid];
     const modeKey=state.attackModes[gid==="a"?0:1];
     const ml=modeKey?ATTACK_MODES[modeKey].label:"—";
@@ -2340,58 +2360,50 @@ function exportImage(){
       const level=val>=3?"large":val>=2?"small":"basic";
       const levelText=level==="basic"?"基础":level==="small"?"小技能":"大技能";
       const traitText=entry.trait?TRAIT_LABELS[entry.trait]:"—";
-      const clashInfo=entry.trait? getClashInfo(entry.trait, gid) : null;
+      const clashInfo=entry.trait?getClashInfo(entry.trait,gid):null;
       const clashTag=clashInfo?(clashInfo.clash?"[拼点]":"[不拼点]"):"";
-      // 主行：罪孽·等级·特性·拼点标记
-      line(SIN_LABELS[k], levelText+" · "+traitText+" "+clashTag);
-      // 拼点公式
+      line(SIN_LABELS[k], levelText+" · "+traitText+" "+clashTag, "#e6c76a", IMG_F_BODY_B);
       if(clashInfo&&clashInfo.clash){
-        ctx.fillStyle="#c8a24b";ctx.font="13px 'Microsoft YaHei',sans-serif";
-        ctx.fillText("  拼点："+clashInfo.formula,84,y);
-        y+=22;
-        if(clashInfo.dmg){
-          ctx.fillText("  伤害："+clashInfo.dmg,84,y);
-          y+=22;
-        }
-        if(clashInfo.noDefDmg){
-          ctx.fillText("  "+clashInfo.noDefDmg,84,y);
-          y+=22;
-        }
+        indent("拼点："+clashInfo.formula,"#c8a24b");
+        if(clashInfo.dmg) indent("伤害："+clashInfo.dmg,"#c8a24b");
       }
-      // 效果
       if(entry.trait){
         if(level==="basic"){
-          ctx.fillStyle="#e8e9ee";ctx.font="13px 'Microsoft YaHei',sans-serif";
-          ctx.fillText("  ▸ "+(CARD_BASE_EFFECT[entry.trait]||""),84,y);
-          y+=22;
+          indent("▸ "+(CARD_BASE_EFFECT[entry.trait]||""));
         }else{
-          ctx.fillStyle="#e8e9ee";ctx.font="13px 'Microsoft YaHei',sans-serif";
-          ctx.fillText("  ▸ 基础："+(CARD_SKILL_BASE[entry.trait]?.[level]||""),84,y);
-          y+=22;
+          indent("▸ 基础："+(CARD_SKILL_BASE[entry.trait]?.[level]||""));
           const qa=getSinQA(k,entry.trait,level);
           (entry.answers||[]).forEach((a,i)=>{
-            if(a!=null && qa[i]?.options?.[a]){
-              const t=`  ▸ ${qa[i].options[a].label}——${qa[i].options[a].effect}`;
-              // 长文本换行
-              const maxW2=W-48-84; let lt2="";
-              for(const ch of t){
-                if(ctx.measureText(lt2+ch).width>maxW2){ ctx.fillText(lt2,84,y); y+=20; lt2=ch; }
-                else lt2+=ch;
-              }
-              ctx.fillText(lt2,84,y); y+=22;
-            }
+            if(a!=null && qa[i]?.options?.[a]) indent("▸ "+qa[i].options[a].label+"——"+qa[i].options[a].effect);
           });
         }
       }
+      y+=8;
     });
-    y+=12;
   };
-  mkGroupLines("a");
-  mkGroupLines("b");
+  groupBlock("a");
+  groupBlock("b");
 
-  // 页脚
-  ctx.fillStyle="#5a5f6e";ctx.font="13px 'Microsoft YaHei',sans-serif";
-  ctx.fillText("Generated by Limbus TRPG 建卡器 · "+new Date().toLocaleString("zh-CN"), 48, H-40);
+  /* —— 页脚 —— */
+  y+=18;
+  on(()=>{
+    ctx.font=IMG_F_FOOT; ctx.fillStyle="#5a5f6e";
+    ctx.fillText("Generated by Limbus TRPG 建卡器 · "+new Date().toLocaleString("zh-CN"), M, y);
+  });
+  y+=34;
+
+  return y; // 内容底部 = 所需的画布高度
+}
+
+function exportImage(){
+  const cv=document.getElementById("exportCanvas");
+  const ctx=cv.getContext("2d");
+  cv.width=IMG_W;
+  // 第一遍只测量内容高度，据此设定画布高度后再真正绘制，避免底部大片留白
+  const h=Math.ceil(paintSheet(ctx,0,true));
+  cv.height=Math.max(400,Math.min(h,20000));
+  // 修改 canvas.height 会重置绘图上下文，第二遍会重新设置全部样式
+  paintSheet(ctx,cv.height,false);
 
   const a=document.createElement("a");
   a.href=cv.toDataURL("image/png");
