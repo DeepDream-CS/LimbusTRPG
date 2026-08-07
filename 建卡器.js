@@ -2150,17 +2150,7 @@ function renderStep3(){
   `;
   document.getElementById("btnJson").onclick=exportJSON;
   document.getElementById("btnImg").onclick=exportImage;
-  document.getElementById("btnRestart").onclick=()=>{
-    if(confirm("确定要清空所有内容重新开始吗？")){
-      state.name="";state.gender="";
-      ATTR_DEFS.forEach(d=>state.attrs[d.key]=1);
-      state.sins=defaultSinProfile();
-      state.ego=defaultEgoProfile();
-      state.attackModes=["",""];state.cardGroups={a:{},b:{}};
-      sinSub=0; sinReaderIdx=0; cardSub=0; cardGroupIdx=0;
-      current=0; render();
-    }
-  };
+  document.getElementById("btnRestart").onclick=confirmResetAll;
 }
 
 /* -------- 侧边实时摘要 -------- */
@@ -2541,6 +2531,28 @@ function loadState(){
     }
   }catch(e){/* 解析失败则用默认状态 */}
 }
+/* 清空全部车卡数据，回到第一步。先删存档再 render()，render() 末尾的 saveState() 会写回默认值 */
+function resetAll(){
+  state.name=""; state.gender="";
+  ATTR_DEFS.forEach(d=>state.attrs[d.key]=1);
+  state.sins=defaultSinProfile();
+  state.ego=defaultEgoProfile();
+  state.attackModes=["",""];
+  state.cardGroups={a:{},b:{}};
+  sinSub=0; sinReaderIdx=0; cardSub=0; cardGroupIdx=0;
+  egoTruncatedNotice=false;
+  deprecatedCardNotices=[];
+  renderAttackMode._tab=0;
+  current=0;
+  try{ localStorage.removeItem(STORAGE_KEY); }catch(e){/* localStorage 不可用时忽略 */}
+  render();
+}
+function confirmResetAll(){
+  if(!confirm("确定要清空当前角色卡的全部内容、从头重新开始吗？\n此操作不可撤销，如需保留请先在「总览与导出」里导出 JSON。")) return;
+  resetAll();
+  toast("已清空，可以重新建卡");
+}
+
 let toastTimer=null;
 function toast(msg){
   const t=document.getElementById("toast");
@@ -2550,6 +2562,7 @@ function toast(msg){
 }
 
 /* ============ 导航按钮 ============ */
+document.getElementById("btnReset").onclick=confirmResetAll;
 btnBack.onclick=()=>{
   if(current===3 && sinSub>0){ sinSub--; render(); return; }
   if(current===6 && cardSub>0){ cardSub--; render(); return; }
