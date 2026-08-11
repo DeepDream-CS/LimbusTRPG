@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Limbus Company TRPG · 鉴定器</title>
+<link rel="stylesheet" href="建卡器.css">
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand">
+      <h1>Limbus Company TRPG · 鉴定器</h1>
+      <div class="sub">Dice Check</div>
+      <a class="btn ghost btn-reset" href="index.html">← 返回建卡器</a>
+    </div>
+  </header>
+
+  <main class="stage">
+    <div class="card">
+      <h2>鉴定</h2>
+      <p class="lead">反复投 1D2：出 <b>1</b> 记一次成功，出 <b>2</b> 消耗一次试错机会。凑够难度所需的成功数即通过，试错耗尽仍未凑够则失败。</p>
+
+      <label class="field">
+        <span class="lab">鉴定类型</span>
+        <div class="gender-row" id="kindRow"></div>
+      </label>
+
+      <label class="field">
+        <span class="lab">检定属性</span>
+        <div class="gender-row" id="attrRow"></div>
+      </label>
+
+      <label class="field" id="sinField">
+        <span class="lab">考校的罪孽</span>
+        <div class="sin-chips" id="sinRow"></div>
+      </label>
+
+      <label class="field">
+        <span class="lab">难度（需要凑够的成功数）</span>
+        <div class="gender-row" id="dcRow"></div>
+      </label>
+
+      <div class="attr-help" id="preview"></div>
+
+      <div class="export-row">
+        <button class="btn primary" id="btnRoll">🎲 投掷</button>
+        <button class="btn ghost" id="btnClearLog">清空记录</button>
+      </div>
+
+      <div id="result"></div>
+    </div>
+
+    <div class="card" style="margin-top:20px">
+      <h2>历史</h2>
+      <div id="history"><p class="empty">还没有投过。</p></div>
+    </div>
+  </main>
+
+  <aside class="summary">
+    <div class="card">
+      <h3>角色设定</h3>
+      <div class="export-row" style="margin:0 0 14px">
+        <button class="btn" id="btnLoad">⇩ 从建卡器读取</button>
+      </div>
+      <div id="attrEdit"></div>
+      <h3 style="margin-top:18px">核心罪孽（优势）</h3>
+      <div class="sin-chips" id="coreEdit"></div>
+      <h3 style="margin-top:18px">排斥罪孽（劣势）</h3>
+      <div class="sin-chips" id="rejEdit"></div>
+      <p class="hint">可多选。优势 / 劣势只在「罪孽鉴定」时生效。</p>
+    </div>
+  </aside>
+</div>
+
+<div class="toast" id="toast"></div>
+<script src="鉴定器.js"></script>
+</body>
+</html>

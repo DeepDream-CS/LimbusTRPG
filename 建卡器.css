@@ -33,6 +33,9 @@ header.top{grid-column:1 / -1;display:flex;flex-direction:column;gap:14px;
 .brand .sub{color:var(--muted);font-size:12px;letter-spacing:2px;text-transform:uppercase;
   white-space:nowrap;border-left:1px solid var(--line);padding-left:12px}
 /* 常驻的清空按钮：靠右，危险色只在悬停时出现，避免误点 */
+.brand .btn-goto{margin-left:auto;align-self:center;padding:7px 16px;font-size:13px;white-space:nowrap;text-decoration:none}
+.brand .btn-goto:hover{border-color:var(--accent);color:var(--accent-2)}
+.brand .btn-goto + .btn-reset{margin-left:0}
 .brand .btn-reset{margin-left:auto;align-self:center;padding:7px 16px;font-size:13px;white-space:nowrap}
 .brand .btn-reset:hover{border-color:var(--danger);color:var(--danger)}
 .steps{display:flex;gap:8px;flex-wrap:wrap}
@@ -104,13 +107,14 @@ input[type=text]:focus,select:focus{border-color:var(--accent)}
 
 /* nav */
 .nav{display:flex;justify-content:space-between;gap:12px;margin-top:24px}
-button.btn{border:1px solid var(--line);background:var(--panel);color:var(--text);
+a.btn{display:inline-block;text-decoration:none}
+.btn{border:1px solid var(--line);background:var(--panel);color:var(--text);
   padding:11px 22px;border-radius:9px;font-size:14px;cursor:pointer;transition:.15s;font-weight:600}
-button.btn:hover:not(:disabled){border-color:var(--accent)}
-button.btn.primary{background:var(--accent);color:var(--bg);border-color:var(--accent)}
-button.btn.primary:hover:not(:disabled){background:var(--accent-2)}
-button.btn:disabled{opacity:.4;cursor:not-allowed}
-button.btn.ghost{background:transparent}
+.btn:hover:not(:disabled){border-color:var(--accent)}
+.btn.primary{background:var(--accent);color:var(--bg);border-color:var(--accent)}
+.btn.primary:hover:not(:disabled){background:var(--accent-2)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn.ghost{background:transparent}
 
 /* sidebar summary */
 aside.summary{position:sticky;top:20px;align-self:start}
@@ -268,3 +272,29 @@ button:focus-visible,.subchip:focus-visible,.rdot:focus-visible,.dot:focus-visib
 .preview-card .card-clash .pill{margin-right:6px}
 .preview-card .card-dmg{color:var(--accent-2)}
 .preview-card .card-effect{font-size:13px;color:var(--text);margin:4px 0 2px;padding:4px 0}
+
+/* ============ 鉴定器 ============ */
+.sin-chips{display:flex;gap:6px;flex-wrap:wrap}
+.sinchip{font-size:12px;color:var(--muted);border:1px solid var(--line);border-radius:8px;
+  padding:5px 10px;background:#0e1016;cursor:pointer;transition:.15s;user-select:none;
+  border-left:4px solid var(--sin-c,var(--line))}
+.sinchip:hover{border-color:var(--accent);border-left-color:var(--sin-c,var(--accent))}
+.sinchip.on{color:var(--text);background:rgba(200,162,75,.14);border-color:var(--accent);font-weight:600}
+.sinchip small{display:block;font-size:10px;opacity:.7;margin-top:1px}
+
+.roll-log{display:flex;flex-direction:column;gap:4px;margin:4px 0 12px}
+.roll-step{display:flex;align-items:center;gap:8px;font-size:13px}
+.roll-idx{width:22px;text-align:right;color:var(--muted);font-size:11px}
+.coin{width:26px;height:26px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;
+  font-weight:700;font-size:13px;border:1px solid var(--line)}
+.coin.hit{background:var(--accent);border-color:var(--accent);color:var(--bg)}
+.coin.miss{background:#161923;color:var(--muted)}
+.roll-tally{color:var(--muted);font-size:12px}
+.roll-verdict{font-size:20px;font-weight:700;padding-top:10px;border-top:1px solid var(--line)}
+.roll-verdict.pass{color:var(--ok)}
+.roll-verdict.fail{color:var(--danger)}
+.roll-verdict small{display:block;font-size:12px;font-weight:400;color:var(--muted);margin-top:2px}
+
+/* 鉴定器没有右侧摘要以外的第二列，属性行沿用 srow 但要放得下步进器 */
+#attrEdit .srow{align-items:center}
+#attrEdit .stepper button{width:26px;height:26px;font-size:15px}

@@ -48,6 +48,81 @@ const SIN_MAX = 3;      // 单项上限
 
 /* ============ 罪孽卡片系统数据 ============ */
 
+/* 敌方的四种意图。我方所有对抗都是针对某个意图，导出时作为速查表一并带上 */
+const ENEMY_INTENTS = [
+  {name:"攻击意图", rule:"可拼点。拼点值 ≥ 意图值 即成功；未接线则自动命中"},
+  {name:"防御意图", rule:"同一敌人若同时挂着防御意图，必须先接下它，才能去接它的攻击意图"},
+  {name:"增益意图", rule:"敌方对自身施加增益。我方的减益类效果可以驱散"},
+  {name:"减益意图", rule:"敌方对我方施加减益。我方的增益类效果可以驱散"}
+];
+/* ============ 鉴定系统 ============
+   普通鉴定：反复投 1D2——出 1 记一次成功，出 2 消耗一次试错机会。
+     难度 = 需要的成功数；试错次数 = 该属性的等级。成功不消耗试错，所以难度再高也有希望。
+   罪孽属性鉴定在此基础上按核心/排斥调整：
+     优势（核心罪孽）：每次投掷有两次机会，任一为 1 即算成功 → 单次成功率 1/2 → 3/4
+     劣势（排斥罪孽）：每次成功需要投出两个 1 → 等效难度翻倍
+   数学上都是「在 需成功数 + 试错次数 - 1 次投掷中至少成功 需成功数 次」。 */
+const CHECK_MODES = {
+  normal:{label:"普通",   p:0.5,  mul:1, note:"投 1D2，出 1 即成功"},
+  adv:   {label:"优势",   p:0.75, mul:1, note:"核心罪孽：每次投掷两次机会，任一为 1 即成功"},
+  dis:   {label:"劣势",   p:0.5,  mul:2, note:"排斥罪孽：每次成功需投出两个 1，等效难度翻倍"}
+};
+function checkOdds(attr, dc, mode="normal"){
+  const m = CHECK_MODES[mode] || CHECK_MODES.normal;
+  const need = dc * m.mul, n = need + attr - 1;
+  if(attr < 1 || need < 1) return 0;
+  const comb=(a,k)=>{let r=1;for(let i=0;i<k;i++) r=r*(a-i)/(i+1);return r;};
+  let s=0;
+  for(let k=need;k<=n;k++) s += comb(n,k)*Math.pow(m.p,k)*Math.pow(1-m.p,n-k);
+  return s;
+}
+const pct = (x)=>Math.round(x*100)+"%";
+/* 难度 1~3 的通过率速查行，供衍生数值页与导出复用 */
+function checkRow(attr, mode="normal"){ return [1,2,3].map(dc=>pct(checkOdds(attr,dc,mode))); }
+/* 沿用旧名，压力鉴定就是意志的普通鉴定 */
+function willCheckTable(){
+  return [1,2,3].map(dc=>({dc, text: pct(checkOdds(state.attrs.意志, dc))}));
+}
+
+/* 鉴定规则速查，导出时与意图、压力并列 */
+const CHECK_RULES = [
+  {name:"普通鉴定", rule:"反复投 1D2：出 1 记一次成功，出 2 消耗一次试错机会"},
+  {name:"难度", rule:"难度 = 需要凑够的成功数"},
+  {name:"试错次数", rule:"试错次数 = 所用属性的等级；试错耗尽仍未凑够即失败"},
+  {name:"优势（核心罪孽）", rule:"每次投掷有两次机会，任一为 1 即算成功"},
+  {name:"劣势（排斥罪孽）", rule:"每次成功需要投出两个 1，等效于难度翻倍"},
+  {name:"用到鉴定的地方", rule:"罪孽压力（难度 = 本场第几次满）、恐慌（难度 2）、E.G.O 侵蚀（难度 = 特效数量）"}
+];
+/* 本角色的通过率表：三种模式 × 难度1~3，属性取该角色实际等级 */
+function checkOddsTable(){
+  const core = state.sins.coreSin, rej = state.sins.rejectedSins||[];
+  return [
+    {mode:"普通", note:"任意属性", rows:[1,2,3,4].map(a=>({attr:a, odds:checkRow(a,"normal")}))},
+    {mode:"优势", note:core?`核心罪孽：${SIN_LABELS[core]}`:"尚未确定核心罪孽", rows:[1,2,3,4].map(a=>({attr:a, odds:checkRow(a,"adv")}))},
+    {mode:"劣势", note:rej.length?`排斥罪孽：${rej.map(k=>SIN_LABELS[k]).join("、")}`:"尚未确定排斥罪孽", rows:[1,2,3,4].map(a=>({attr:a, odds:checkRow(a,"dis")}))}
+  ];
+}
+
+/* 罪孽压力规则。上限与鉴定难度都会随战斗推进恶化，是一条独立的消耗线 */
+const SIN_PRESSURE_RULES = [
+  {name:"上限", rule:"意志 + 2，初始压力为 0"},
+  {name:"增减", rule:"部分高伤害选项以「压力 +1」为代价；治疗与增益类可降低压力"},
+  {name:"压力满", rule:"立刻进行一次意志的普通鉴定，难度 = 本场战斗第几次压力满"},
+  {name:"鉴定通过", rule:"压力清零，但压力上限 -1"},
+  {name:"鉴定失败", rule:"混乱一回合"},
+  {name:"难度递增", rule:"本场战斗第一次压力满时难度为 1，第二次为 2，以此类推"},
+  {name:"战斗结束", rule:"压力上限恢复到初始值（意志 + 2）"},
+  {name:"战斗外满压", rule:"若进入战斗时压力已满，立刻进行一次意志鉴定"}
+];
+
+/* 卡面对意图的四种操作，导出时与意图类型一并列出 */
+const INTENT_OPS = [
+  {name:"驱散", rule:"移除已经生效的增益或减益。我方增益类清我方减益，减益类清敌方增益"},
+  {name:"打断", rule:"取消敌方一个尚未结算的意图，该意图直接作废"},
+  {name:"延后", rule:"把敌方一个尚未结算的意图推到下一轮——它不会消失，而是叠加到其下一轮的意图上"},
+  {name:"转向", rule:"让敌方的攻击意图改为指向另一名敌人；场上只有一名敌人时按卡面的替代条款处理"}
+];
+
 /* 攻击模式（6.2）
    bonus 是该模式在本组所有拼点中持续生效的副效果——三条形状不同：
    斩击提高命中率、打击提高收益、突刺提供保底。 */
@@ -173,7 +248,7 @@ const SIN_TRAIT_QA = {
         {question:"它让你能够____。",options:[
           {label:"尽情释放",effect:"你的拼点骰 +2"},
           {label:"挑战众人",effect:"命中时所有其他敌人受到 3 点伤害"},
-          {label:"破釜沉舟",effect:"你受到 3 点伤害，本次伤害 +5"}
+          {label:"破釜沉舟",effect:"你受到 3 点伤害，你的罪孽压力 +1，本次伤害 +5"}
         ]},
         {question:"怒火的尽头是什么？",options:[
           {label:"精疲力竭",effect:"你获得 4 点临时生命，但本轮不能打出防御卡"},
@@ -187,29 +262,29 @@ const SIN_TRAIT_QA = {
         {question:"你如何以怒还怒？",options:[
           {label:"反击",effect:"防御胜利时，对攻击者造成 3 点伤害"},
           {label:"震慑",effect:"本次意图值 -1"},
-          {label:"蛮力",effect:"防御胜利时，攻击者本轮受到的伤害 +2"}
+          {label:"蛮力",effect:"防御胜利时，取消攻击者本轮尚未结算的一个意图"}
         ]},
         {question:"你的防线由什么构成？",options:[
           {label:"暴戾",effect:"你的防御拼点骰 +1"},
           {label:"嗜血",effect:"防御胜利时你恢复 2 HP"},
-          {label:"不退半步",effect:"防御失败时你恢复 3 HP"}
+          {label:"不退半步",effect:"防御失败时你获得 5 点临时生命"}
         ]}
       ],
       large:[
         {question:"你如何以怒还怒？",options:[
           {label:"反击",effect:"防御胜利时，对攻击者造成 5 点伤害"},
           {label:"震慑",effect:"本次意图值 -2"},
-          {label:"蛮力",effect:"防御胜利时，攻击者本轮受到的伤害 +3"}
+          {label:"蛮力",effect:"防御胜利时，取消攻击者本轮尚未结算的一个意图；若其没有其他意图，改为其本轮受到的伤害 +3"}
         ]},
         {question:"你的防线由什么构成？",options:[
           {label:"暴戾",effect:"你的防御拼点骰 +2"},
           {label:"嗜血",effect:"防御胜利时你恢复 4 HP"},
-          {label:"不退半步",effect:"防御失败时你恢复 5 HP"}
+          {label:"不退半步",effect:"防御失败时你获得 8 点临时生命"}
         ]},
         {question:"愤怒的壁垒能撑多久？",options:[
           {label:"以攻代守",effect:"防御胜利时额外造成 2 点伤害，防御失败时仍对攻击者造成 2 点伤害"},
           {label:"怒焰护体",effect:"防御胜利时，攻击者受到 3 点灼烧伤害"},
-          {label:"【切换】怒焰之壁",effect:"切换到此攻击模式时，你获得 3 点临时生命"}
+          {label:"【切换】怒焰之壁",effect:"切换到此攻击模式时，对所有敌人造成 3 点伤害"}
         ]}
       ]
     }
@@ -219,11 +294,11 @@ const SIN_TRAIT_QA = {
       small:[
         {question:"你的攻击中蕴含什么？",options:[
           {label:"魅力",effect:"命中后一名友方恢复 2 HP"},
-          {label:"执念",effect:"命中后你的拼点骰 +1（本次攻击中立即生效）"},
+          {label:"执念",effect:"你的拼点骰 +1"},
           {label:"诱惑",effect:"本次意图值 -1"}
         ]},
         {question:"你从中得到了什么？",options:[
-          {label:"满足",effect:"命中后你恢复 2 HP"},
+          {label:"满足",effect:"命中后你恢复 2 HP，你的罪孽压力 -1（最低为 0）"},
           {label:"渴望",effect:"命中后你对同一目标立即再造成 2 点伤害"},
           {label:"牵绊",effect:"命中后你和一名友方各恢复 1 HP"}
         ]}
@@ -235,7 +310,7 @@ const SIN_TRAIT_QA = {
           {label:"诱惑",effect:"本次意图值 -2"}
         ]},
         {question:"你从中得到了什么？",options:[
-          {label:"满足",effect:"命中后你恢复 4 HP"},
+          {label:"满足",effect:"命中后你恢复 4 HP，你的罪孽压力 -1（最低为 0）"},
           {label:"渴望",effect:"命中后你对同一目标立即再造成 3 点伤害"},
           {label:"牵绊",effect:"命中后你和所有友方各恢复 2 HP"}
         ]},
@@ -254,8 +329,8 @@ const SIN_TRAIT_QA = {
           {label:"敏锐",effect:"你或一名友方本轮受到的伤害 -2"}
         ]},
         {question:"增益的代价是什么？",options:[
-          {label:"微痛",effect:"你受到 1 点伤害，效果数值 +1"},
-          {label:"无偿",effect:"你和一名友方各恢复 2 HP"},
+          {label:"微痛",effect:"你受到 1 点伤害，本卡的所有恢复与临时生命数值 +1"},
+          {label:"涤净",effect:"你或一名友方移除一个减益效果，并恢复 2 HP"},
           {label:"依赖",effect:"你受到 1 点伤害，一名友方本轮拼点骰 +1"}
         ]}
       ],
@@ -266,13 +341,13 @@ const SIN_TRAIT_QA = {
           {label:"敏锐",effect:"你或一名友方本轮受到的伤害 -3"}
         ]},
         {question:"增益的代价是什么？",options:[
-          {label:"微痛",effect:"你受到 2 点伤害，效果数值 +2"},
-          {label:"无偿",effect:"你和所有友方各恢复 2 HP"},
+          {label:"微痛",effect:"你受到 2 点伤害，本卡的所有恢复与临时生命数值 +2"},
+          {label:"涤净",effect:"所有友方各移除一个减益效果，你恢复 3 HP"},
           {label:"依赖",effect:"你受到 1 点伤害，一名友方本轮拼点骰 +2"}
         ]},
         {question:"增幅的极致是？",options:[
           {label:"共鸣",effect:"所有友方本轮拼点骰 +1"},
-          {label:"持久",effect:"你和一名友方各获得 3 点临时生命"},
+          {label:"安抚",effect:"你与一名友方的罪孽压力各 -1（最低为 0），并各获得 2 点临时生命"},
           {label:"【切换】欲望之潮",effect:"切换到此攻击模式时，你和所有友方各恢复 2 HP"}
         ]}
       ]
@@ -316,25 +391,25 @@ const SIN_TRAIT_QA = {
       small:[
         {question:"你用什么替他挡下来？",options:[
           {label:"厚甲",effect:"你获得 5 点临时生命"},
-          {label:"分担",effect:"你与被庇护的友方各获得 3 点临时生命"},
-          {label:"垫背",effect:"拼点失败时你改为获得 8 点临时生命"}
+          {label:"分担",effect:"被庇护的友方本轮受到的伤害 -3"},
+          {label:"垫背",effect:"被庇护的友方移除一个减益效果，并获得 3 点临时生命"}
         ]},
         {question:"挡下之后呢？",options:[
           {label:"反压",effect:"拼点胜利时，对攻击者造成等同于你当前临时生命一半的伤害（向下取整）"},
-          {label:"稳住阵脚",effect:"被庇护的友方本轮拼点骰 +2"},
-          {label:"顺势",effect:"你的援护拼点骰 +2；拼点胜利时你额外获得 2 点临时生命"}
+          {label:"拖延",effect:"将攻击者本轮一个尚未结算的意图推迟到下一轮——它不会消失，而是叠加到其下一轮的意图上"},
+          {label:"喘息",effect:"你的援护拼点骰 +2；拼点胜利时你与被庇护的友方的罪孽压力各 -1（最低为 0）"}
         ]}
       ],
       large:[
         {question:"你用什么替他挡下来？",options:[
           {label:"厚甲",effect:"你获得 8 点临时生命"},
-          {label:"分担",effect:"你与所有友方各获得 4 点临时生命"},
-          {label:"垫背",effect:"拼点失败时你改为获得 12 点临时生命"}
+          {label:"分担",effect:"所有友方本轮受到的伤害 -3"},
+          {label:"垫背",effect:"所有友方各移除一个减益效果，你获得 4 点临时生命"}
         ]},
         {question:"挡下之后呢？",options:[
           {label:"反压",effect:"拼点胜利时，对攻击者造成等同于你当前临时生命的伤害"},
-          {label:"稳住阵脚",effect:"所有友方本轮拼点骰 +2"},
-          {label:"顺势",effect:"你的援护拼点骰 +3；拼点胜利时你额外获得 4 点临时生命"}
+          {label:"拖延",effect:"将攻击者本轮所有尚未结算的意图推迟到下一轮——它们不会消失，而是叠加到其下一轮的意图上"},
+          {label:"喘息",effect:"你的援护拼点骰 +3；拼点胜利时所有友方的罪孽压力各 -1（最低为 0）"}
         ]},
         {question:"把整组都押上去，换来什么？",options:[
           {label:"倾覆",effect:"每弃掉一张卡片改为获得 5 点临时生命"},
@@ -367,10 +442,10 @@ const SIN_TRAIT_QA = {
         {question:"你的胃口有多大？",options:[
           {label:"贪得无厌",effect:"若此攻击击杀目标，你额外恢复 8 HP"},
           {label:"细嚼慢咽",effect:"你本卡的所有恢复效果 +3"},
-          {label:"饥不择食",effect:"你受到 4 点伤害，本次伤害 +5"}
+          {label:"饥不择食",effect:"你受到 4 点伤害，你的罪孽压力 +1，本次伤害 +5"}
         ]},
         {question:"吞噬的尽头是？",options:[
-          {label:"消化吸收",effect:"你获得 5 点临时生命"},
+          {label:"消化吸收",effect:"移除目标身上一个增益效果，你恢复 5 HP；若其没有增益，改为获得 5 点临时生命"},
           {label:"吐故纳新",effect:"额外弃掉一张未使用卡片，你恢复 5 HP"},
           {label:"【切换】暴食之躯",effect:"切换到此攻击模式时，你恢复 3 HP，并获得 2 点临时生命"}
         ]}
@@ -410,25 +485,25 @@ const SIN_TRAIT_QA = {
     special:{
       small:[
         {question:"你舍弃什么来换取更多？",options:[
-          {label:"丢弃锋芒",effect:"弃掉一张攻击卡，恢复 3 HP"},
-          {label:"丢弃坚壁",effect:"弃掉一张防御卡，恢复 3 HP"},
-          {label:"丢弃积累",effect:"弃掉任意一张未使用卡片，恢复 3 HP"}
+          {label:"丢弃锋芒",effect:"弃掉一张攻击卡，恢复 3 HP 并获得 2 点临时生命"},
+          {label:"丢弃坚壁",effect:"弃掉一张防御 / 援护 / 反击卡，恢复 3 HP，本轮你的拼点骰 +1"},
+          {label:"丢弃积累",effect:"弃掉任意一张未使用卡片，恢复 5 HP"}
         ]},
         {question:"循环加速后你得到什么？",options:[
           {label:"饥饿感",effect:"你本轮拼点骰 +1"},
-          {label:"满足感",effect:"你额外恢复 2 HP"},
+          {label:"满足感",effect:"你额外恢复 2 HP，你的罪孽压力 -1（最低为 0）"},
           {label:"空虚感",effect:"你受到 1 点伤害，但本轮你的所有恢复效果 +2"}
         ]}
       ],
       large:[
         {question:"你舍弃什么来换取更多？",options:[
-          {label:"丢弃锋芒",effect:"弃掉两张攻击卡，恢复 5 HP"},
-          {label:"丢弃坚壁",effect:"弃掉两张防御卡，恢复 5 HP"},
-          {label:"丢弃积累",effect:"弃掉两张任意未使用卡片，恢复 5 HP"}
+          {label:"丢弃锋芒",effect:"弃掉两张攻击卡，恢复 5 HP 并获得 4 点临时生命"},
+          {label:"丢弃坚壁",effect:"弃掉两张防御 / 援护 / 反击卡，恢复 5 HP，本轮你的拼点骰 +2"},
+          {label:"丢弃积累",effect:"弃掉两张任意未使用卡片，恢复 8 HP"}
         ]},
         {question:"循环加速后你得到什么？",options:[
           {label:"饥饿感",effect:"你本轮拼点骰 +2"},
-          {label:"满足感",effect:"你额外恢复 3 HP"},
+          {label:"满足感",effect:"你额外恢复 3 HP，你的罪孽压力 -1（最低为 0）"},
           {label:"空虚感",effect:"你受到 2 点伤害，但本轮你的所有恢复效果 +3"}
         ]},
         {question:"贪婪的尽头是？",options:[
@@ -444,24 +519,24 @@ const SIN_TRAIT_QA = {
       small:[
         {question:"你的痛苦如何伤害他人？",options:[
           {label:"腐蚀",effect:"本次意图值 -1"},
-          {label:"沉重",effect:"命中后目标本轮不能接线"},
+          {label:"沉重",effect:"命中后取消目标本轮一个尚未结算的增益或减益意图；若其没有此类意图，改为其本轮受到的伤害 +2"},
           {label:"侵蚀",effect:"命中后目标本轮不能恢复 HP、不能获得临时生命"}
         ]},
         {question:"你付出的代价是什么？",options:[
           {label:"自责",effect:"你受到 2 点伤害，本次伤害 +3"},
-          {label:"麻木",effect:"你本轮拼点骰 -1，但本次伤害 +2"},
+          {label:"麻木",effect:"你的罪孽压力 +1，本次伤害 +2"},
           {label:"承受",effect:"你本轮防御拼点骰 -2，但目标本轮所有意图值 -2"}
         ]}
       ],
       large:[
         {question:"你的痛苦如何伤害他人？",options:[
           {label:"腐蚀",effect:"本次意图值 -2"},
-          {label:"沉重",effect:"命中后目标本轮不能接线，且其所有意图值 -1"},
+          {label:"沉重",effect:"命中后取消目标本轮所有尚未结算的增益与减益意图；若其没有此类意图，改为其本轮所有意图值 -2"},
           {label:"侵蚀",effect:"命中后目标本轮不能恢复 HP、不能获得临时生命，且其所有意图值 -1"}
         ]},
         {question:"你付出的代价是什么？",options:[
-          {label:"自责",effect:"你受到 3 点伤害，本次伤害 +4"},
-          {label:"麻木",effect:"你本轮拼点骰 -1，但本次伤害 +3"},
+          {label:"自责",effect:"你受到 3 点伤害，你的罪孽压力 +1，本次伤害 +4"},
+          {label:"麻木",effect:"你的罪孽压力 +1，本次伤害 +3"},
           {label:"承受",effect:"你本轮防御拼点骰 -2，但目标本轮所有意图值 -3"}
         ]},
         {question:"苦难的尽头是？",options:[
@@ -476,7 +551,7 @@ const SIN_TRAIT_QA = {
         {question:"你要夺走什么？",options:[
           {label:"力量",effect:"目标本轮造成的伤害 -3"},
           {label:"意志",effect:"目标本轮所有意图值额外 -1"},
-          {label:"敏锐",effect:"目标本轮受到的伤害 +2"}
+          {label:"凭恃",effect:"移除目标身上一个增益效果；若其没有增益，改为其本轮受到的伤害 +2"}
         ]},
         {question:"痛苦如何扩散？",options:[
           {label:"蔓延",effect:"与目标相邻的一名敌人本轮意图值 -1"},
@@ -488,7 +563,7 @@ const SIN_TRAIT_QA = {
         {question:"你要夺走什么？",options:[
           {label:"力量",effect:"目标本轮造成的伤害 -5"},
           {label:"意志",effect:"目标本轮所有意图值额外 -2"},
-          {label:"敏锐",effect:"目标本轮受到的伤害 +3"}
+          {label:"凭恃",effect:"移除目标身上一个增益效果；若其没有增益，改为其本轮受到的伤害 +3"}
         ]},
         {question:"痛苦如何扩散？",options:[
           {label:"蔓延",effect:"与目标相邻的所有敌人本轮意图值各 -1"},
@@ -513,7 +588,7 @@ const SIN_TRAIT_QA = {
         ]},
         {question:"你的方式是什么？",options:[
           {label:"完美计算",effect:"你可以在看到本次意图值后，再决定是否使用此卡（若不用则不消耗）"},
-          {label:"全面压制",effect:"命中后目标本轮不能打出防御卡"},
+          {label:"全面压制",effect:"本次攻击无视目标的防御意图，直接与其攻击意图拼点"},
           {label:"临机应变",effect:"若拼点失败，你立即打出一张防御卡作为反应（额外消耗该卡）"}
         ]}
       ],
@@ -525,11 +600,11 @@ const SIN_TRAIT_QA = {
         ]},
         {question:"你的方式是什么？",options:[
           {label:"完美计算",effect:"你可以在看到本次意图值后，再决定是否使用此卡（若不用则不消耗）"},
-          {label:"全面压制",effect:"命中后目标本轮不能打出防御卡"},
+          {label:"全面压制",effect:"本次攻击无视目标的防御意图；且本轮该目标的防御意图对所有友方失效"},
           {label:"临机应变",effect:"若拼点失败，你仅受到基础伤害，且对目标造成 2 点伤害"}
         ]},
         {question:"完美的代价是？",options:[
-          {label:"不容差错",effect:"若此卡未命中，你受到 3 点伤害"},
+          {label:"不容差错",effect:"若此卡命中，本次伤害 +4；若未命中，你受到 3 点伤害且罪孽压力 +1"},
           {label:"游刃有余",effect:"你获得 3 点临时生命"},
           {label:"【切换】王者之姿",effect:"切换到此攻击模式时，你本轮拼点骰 +1，恢复 2 HP"}
         ]}
@@ -591,7 +666,7 @@ const SIN_TRAIT_QA = {
           {label:"灵活",effect:"你可以在第一次攻击结果出来后，再决定第二次攻击的目标"}
         ]},
         {question:"双重打击的极致是？",options:[
-          {label:"无间断",effect:"若两次攻击均命中，目标本轮不能行动"},
+          {label:"无间断",effect:"若两次攻击均命中，取消目标本轮尚未结算的所有意图"},
           {label:"精益求精",effect:"你加入的那张额外攻击卡也获得本卡的一条特效"},
           {label:"【切换】绝对支配",effect:"切换到此攻击模式时，本回合两次攻击的伤害各 +2"}
         ]}
@@ -609,7 +684,7 @@ const SIN_TRAIT_QA = {
         {question:"你会怎么做？",options:[
           {label:"夺过来",effect:"本次意图值 -1"},
           {label:"模仿",effect:"本次攻击改用你另一组攻击模式的拼点属性（两组模式相同时改为拼点骰 +1）"},
-          {label:"毁掉",effect:"命中后你对同一目标立即造成 2 点额外伤害"}
+          {label:"毁掉",effect:"命中后取消目标本轮一个尚未结算的增益或减益意图；若其没有此类意图，改为立即再造成 2 点伤害"}
         ]}
       ],
       large:[
@@ -621,10 +696,10 @@ const SIN_TRAIT_QA = {
         {question:"你会怎么做？",options:[
           {label:"夺过来",effect:"本次意图值 -2"},
           {label:"模仿",effect:"本次攻击改用你另一组攻击模式的拼点属性，且你的拼点骰 +1（两组模式相同时改为拼点骰 +2）"},
-          {label:"毁掉",effect:"命中后你对同一目标立即造成 3 点额外伤害"}
+          {label:"毁掉",effect:"命中后取消目标本轮一个尚未结算的增益或减益意图；若其没有此类意图，改为立即再造成 3 点伤害"}
         ]},
         {question:"不甘的尽头是？",options:[
-          {label:"同归于尽",effect:"你和目标各受到 3 点伤害"},
+          {label:"同归于尽",effect:"你和目标各受到 3 点伤害，你的罪孽压力 +1"},
           {label:"后来居上",effect:"若本次伤害使目标 HP 降至低于你，你恢复 3 HP"},
           {label:"【切换】不甘之眼",effect:"切换到此攻击模式时，你选择一名敌人，其本轮意图值 -1"}
         ]}
@@ -657,7 +732,7 @@ const SIN_TRAIT_QA = {
         {question:"嫉妒之壁的尽头是？",options:[
           {label:"全盘模仿",effect:"防御成功时，你获得本次攻击者所用卡片的一条特效，本轮内有效"},
           {label:"后来居上",effect:"若你的 HP 低于攻击者，防御成功时你恢复 3 HP"},
-          {label:"【切换】不甘之壁",effect:"切换到此攻击模式时，你获得 3 点临时生命"}
+          {label:"【切换】不甘之壁",effect:"切换到此攻击模式时，移除一名敌人身上一个增益效果"}
         ]}
       ]
     },
@@ -666,27 +741,27 @@ const SIN_TRAIT_QA = {
         {question:"你想影响什么？",options:[
           {label:"局势",effect:"一名友方本轮拼点骰 +2"},
           {label:"对比",effect:"一名敌人本轮意图值 -2"},
-          {label:"侵蚀",effect:"一名敌人本轮受到的伤害 +2"}
+          {label:"艳羡",effect:"移除一名敌人身上一个增益效果，并让一名友方获得同一效果"}
         ]},
         {question:"你的手段是什么？",options:[
           {label:"竞争",effect:"一名友方本轮拼点骰 +1，一名敌人本轮意图值 -1"},
-          {label:"窃取",effect:"一名敌人本轮意图值 -1，一名友方恢复 2 HP"},
-          {label:"标记",effect:"你对一名敌人立即造成 1 点伤害"}
+          {label:"窃取",effect:"将你或一名友方身上的一个减益，转移到一名敌人身上"},
+          {label:"挑拨",effect:"将一名敌人的一个攻击意图改为指向另一名敌人；场上只有一名敌人时，改为该意图的意图值 -3"}
         ]}
       ],
       large:[
         {question:"你想影响什么？",options:[
           {label:"局势",effect:"一名友方本轮拼点骰 +3"},
           {label:"对比",effect:"一名敌人本轮意图值 -3"},
-          {label:"侵蚀",effect:"一名敌人本轮受到的伤害 +3"}
+          {label:"艳羡",effect:"移除一名敌人身上一个增益效果，并让所有友方获得同一效果"}
         ]},
         {question:"你的手段是什么？",options:[
           {label:"竞争",effect:"一名友方本轮拼点骰 +2，一名敌人本轮意图值 -2"},
-          {label:"窃取",effect:"一名敌人本轮意图值 -2，一名友方恢复 3 HP"},
-          {label:"标记",effect:"你对一名敌人立即造成 2 点伤害"}
+          {label:"窃取",effect:"将你与一名友方身上各一个减益，转移到一名敌人身上"},
+          {label:"挑拨",effect:"将一名敌人的一个攻击意图改为指向另一名敌人，并使其意图值 -2；场上只有一名敌人时，改为该敌人按此意图对自身结算"}
         ]},
         {question:"嫉妒的尽头是？",options:[
-          {label:"公之于众",effect:"一名敌人本轮意图值 -2"},
+          {label:"公之于众",effect:"移除一名敌人身上的所有增益效果，其本轮意图值 -1"},
           {label:"【切换】不甘之眼",effect:"切换到此攻击模式时，一名敌人本轮意图值 -1，一名友方本轮拼点骰 +1"},
           {label:"逆转",effect:"若场上任何敌人 HP 高于所有友方，你恢复 3 HP"}
         ]}
@@ -716,7 +791,7 @@ const EGO_SIN_EFFECT = {
   gluttony:{label:"吞食",effect:"本轮你造成伤害后，恢复其中 1/3（向下取整）"},
   gloom:   {label:"共苦",effect:"你受到 2 点伤害，本次 E.G.O 所有数值效果 +2",
             effectBlessing:"你本轮拼点骰 -2，本次 E.G.O 所有数值效果 +2"},
-  pride:   {label:"君临",effect:"本轮本次目标不能打出防御卡"},
+  pride:   {label:"君临",effect:"本次 E.G.O 无视目标的防御意图"},
   envy:    {label:"夺冠",effect:"若场上有敌人当前 HP 高于你，本次 E.G.O 所有数值效果 +2"}
 };
 function getEgoSinEffect(){
@@ -918,7 +993,7 @@ const EGO_MAX_EFFECTS = 4;
 const egoEffectCount = () => Math.min(state.attrs.共感, EGO_MAX_EFFECTS);
 const egoShardCap = () => state.attrs.意志 + 2;
 const egoShardCost = () => 1;
-const egoCorrosionDC = () => 4 + egoEffectCount();
+const egoCorrosionDC = () => egoEffectCount();   // 侵蚀 = 意志普通鉴定的难度，等于特效数量
 
 /* 共感变化后，截断超出新特效数量的已选问答（不静默丢弃——记录供 UI 提示） */
 let egoTruncatedNotice = false;
@@ -1394,6 +1469,22 @@ function renderStep2(){
         <div class="note">= 意志(${state.attrs.意志}) + 2；初始压力恒为 0，战斗中累积</div>
       </div>
       <div class="stat">
+        <div class="k">意志鉴定（压力 / 恐慌 / 侵蚀）</div>
+        <div class="v" style="font-size:18px">${state.attrs.意志} 次试错</div>
+        <div class="note">${willCheckTable().map(r=>`难度${r.dc} <b style="color:var(--accent-2)">${r.text}</b>`).join(" · ")}</div>
+      </div>
+      <div class="stat" style="grid-column:1/-1">
+        <div class="k">鉴定速查</div>
+        <div class="note" style="margin:6px 0 0">${CHECK_RULES.map(t=>`<br>· <b>${t.name}</b>——${t.rule}`).join("")}</div>
+        <table class="sh auto" style="margin-top:10px">
+          <tr><td style="color:var(--muted)">通过率</td><td style="color:var(--muted)">属性1</td><td style="color:var(--muted)">属性2</td><td style="color:var(--muted)">属性3</td><td style="color:var(--muted)">属性4</td></tr>
+          ${checkOddsTable().map(m=>[1,2,3].map(dc=>
+            `<tr><td>${m.mode} · 难度${dc}</td>${m.rows.map(r=>`<td>${r.odds[dc-1]}</td>`).join("")}</tr>`
+          ).join("")).join("")}
+        </table>
+        <div class="note" style="margin-top:8px">${checkOddsTable().map(m=>`${m.mode}：${m.note}`).join(" · ")}</div>
+      </div>
+      <div class="stat">
         <div class="k">E.G.O 特效数量</div>
         <div class="v">${egoEffectCount()}</div>
         <div class="note">= 共感(${state.attrs.共感})，每点共感一条特效（上限 ${EGO_MAX_EFFECTS}）</div>
@@ -1413,10 +1504,15 @@ function renderStep2(){
       <br>· 当前 HP ≤ 第一混乱线 → 所有拼点骰 -1
       <br>· 当前 HP ≤ 第二混乱线 → 所有拼点骰 -2（不与上一条叠加）
       <br>· HP 被治疗回到线上时，惩罚立即解除
-      <br>· 恐慌判定：首次跌破第二混乱线时，进行 1D6 + 意志 ≥ 7 的判定，失败则本回合由 GM 接管；每场战斗只判定一次
+      <br>· 恐慌判定：首次跌破第二混乱线时，进行<b>难度 2 的意志普通鉴定</b>，失败则本回合由 GM 接管；每场战斗只判定一次
       <br><b>意志的作用：</b> 碎片承载上限、罪孽压力上限（均为 意志 + 2）、恐慌判定、E.G.O 侵蚀判定、创伤稳定性。
       <br><b>共感的作用：</b> E.G.O 特效数量（每点一条）、援护与支援类判定。
       <br>本游戏只有一种伤害，所有伤害都先扣临时生命、再扣 HP，不存在无视临时生命的伤害类型，也不存在任何减伤检定。
+      <br><b>敌方意图：</b> 敌方每轮公布若干意图，我方所有对抗都是针对某个意图。
+      ${ENEMY_INTENTS.map(t=>`<br>· <b>${t.name}</b>——${t.rule}`).join("")}
+      ${INTENT_OPS.map(t=>`<br>· <b>${t.name}</b>——${t.rule}`).join("")}
+      <br><b>罪孽压力：</b>与 HP 平行的第二条消耗线，满了会失控。
+      ${SIN_PRESSURE_RULES.map(t=>`<br>· <b>${t.name}</b>——${t.rule}`).join("")}
       <br><b>拼点与意图值：</b> 敌方公布攻击意图时会同时给出一个<b>意图值</b>，敌方不投骰。
       <br>· 只有我方投拼点骰：<b>拼点值 = 1D6 + 属性 + 拼点修正</b>
       <br>· 拼点值 <b>≥ 意图值</b> 即成功；超出的部分称为<b>差值</b>（差值 = 拼点值 - 意图值，最低为 0）
@@ -1705,7 +1801,7 @@ function renderEgoStep(){
 
   stageCard.innerHTML=`
     <h2>E.G.O</h2>
-    <p class="lead">每名角色只能持有一个 E.G.O。罪孽属性、等级、特效数量、碎片消耗、侵蚀阈值、碎片承载上限均由已有数据自动推导。</p>
+    <p class="lead">每名角色只能持有一个 E.G.O。罪孽属性、等级、特效数量、碎片消耗、侵蚀难度、碎片承载上限均由已有数据自动推导。</p>
     <div class="grid2">
       <div class="stat">
         <div class="k">罪孽属性</div>
@@ -1723,9 +1819,9 @@ function renderEgoStep(){
         <div class="note">= 共感(${state.attrs.共感})，每点共感一条特效${state.attrs.共感>EGO_MAX_EFFECTS?`（题库上限 ${EGO_MAX_EFFECTS}）`:""}</div>
       </div>
       <div class="stat">
-        <div class="k">碎片消耗 / 侵蚀阈值</div>
+        <div class="k">碎片消耗 / 侵蚀难度</div>
         <div class="v">${egoShardCost()} / ${dc}</div>
-        <div class="note">侵蚀阈值 = 4 + 特效数量(${ec})</div>
+        <div class="note">侵蚀 = 难度 ${dc} 的意志普通鉴定（难度 = 特效数量）· 通过率 ${pct(checkOdds(state.attrs.意志,dc))}</div>
       </div>
       <div class="stat">
         <div class="k">碎片承载上限</div>
@@ -2252,7 +2348,7 @@ function renderStep3(){
           <tr><td>等级</td><td>${eg.grade}</td></tr>
           <tr><td>类型</td><td>${eg.typeLabel}</td></tr>
           <tr><td>特效数量</td><td>共感(${state.attrs.共感}) = ${eg.effectCount} 条</td></tr>
-          <tr><td>碎片消耗 / 侵蚀阈值</td><td>${eg.shardCost} / ${eg.corrosionDC}</td></tr>
+          <tr><td>碎片消耗 / 侵蚀难度</td><td>${eg.shardCost} / 难度 ${eg.corrosionDC}（意志普通鉴定，通过率 ${pct(checkOdds(state.attrs.意志,eg.corrosionDC))}）</td></tr>
           <tr><td>碎片承载上限</td><td>${eg.shardCap}</td></tr>
           <tr><td>当前碎片</td><td>___（战斗中手动填写）</td></tr>
           <tr><td>基础功能</td><td>${eg.baseEffect}</td></tr>
@@ -2262,6 +2358,27 @@ function renderStep3(){
         <table class="sh" style="margin-top:8px">${qaRows}</table>
         <table class="sh" style="margin-top:8px"><tr><td>显现描述</td><td>${escapeHtml(eg.description)||'—'}</td></tr></table>`;
       })()}
+    </div>
+    <div class="sheet">
+      <h4>敌方意图速查</h4>
+      <table class="sh auto">
+        ${ENEMY_INTENTS.map(t=>`<tr><td>${t.name}</td><td>${t.rule}</td></tr>`).join("")}
+        ${INTENT_OPS.map(t=>`<tr><td>${t.name}</td><td>${t.rule}</td></tr>`).join("")}
+      </table>
+    </div>
+    <div class="sheet">
+      <h4>鉴定速查</h4>
+      <table class="sh auto">
+        ${CHECK_RULES.map(t=>`<tr><td>${t.name}</td><td>${t.rule}</td></tr>`).join("")}
+        ${checkOddsTable().map(m=>`<tr><td>${m.mode}（${m.note}）</td><td>属性1~4 在难度1/2/3 下：${m.rows.map(r=>r.odds.join("/")).join(" · ")}</td></tr>`).join("")}
+      </table>
+    </div>
+    <div class="sheet">
+      <h4>罪孽压力速查</h4>
+      <table class="sh auto">
+        ${SIN_PRESSURE_RULES.map(t=>`<tr><td>${t.name}</td><td>${t.rule}</td></tr>`).join("")}
+        <tr><td>本角色通过率</td><td>${state.attrs.意志} 次机会 · ${willCheckTable().map(r=>`难度${r.dc} ${r.text}`).join(" · ")}</td></tr>
+      </table>
     </div>
     <div class="sheet">
       <h4>攻击模式</h4>
@@ -2350,6 +2467,13 @@ function buildData(){
     },
     // E.G.O 数据
     ego: buildEgoExport(),
+    敌方意图速查:[...ENEMY_INTENTS.map(t=>({意图:t.name,规则:t.rule})),
+      ...INTENT_OPS.map(t=>({意图:t.name,规则:t.rule})),
+      ],
+    鉴定速查:[...CHECK_RULES.map(t=>({项:t.name,规则:t.rule})),
+      ...checkOddsTable().map(m=>({项:`${m.mode}通过率`,规则:`${m.note}；属性1~4 在难度1/2/3 下 `+m.rows.map(r=>r.odds.join("/")).join(" · ")}))],
+    罪孽压力速查:[...SIN_PRESSURE_RULES.map(t=>({项:t.name,规则:t.rule})),
+      {项:"本角色通过率",规则:`${state.attrs.意志} 次机会 · `+willCheckTable().map(r=>`难度${r.dc} ${r.text}`).join(" · ")}],
     攻击模式:modeByGroup,
     罪孽卡片:{a:buildCardGroupExport("a"),b:buildCardGroupExport("b")}
   };
@@ -2485,7 +2609,7 @@ function paintSheet(ctx, H, measure){
     line("罪孽属性 / 等级", eg.sinLabel+" / "+eg.grade);
     line("类型", eg.typeLabel);
     line("特效数量", "共感("+state.attrs.共感+") = "+eg.effectCount+" 条");
-    line("碎片消耗 / 侵蚀阈值", eg.shardCost+" / "+eg.corrosionDC);
+    line("碎片消耗 / 侵蚀难度", eg.shardCost+" / 难度 "+eg.corrosionDC+"（意志普通鉴定，通过率 "+pct(checkOdds(state.attrs.意志,eg.corrosionDC))+"）");
     line("碎片承载上限", String(eg.shardCap));
     line("基础功能", eg.baseEffect);
     if(eg.clash){ line("拼点", eg.clash.formula); line("伤害", eg.clash.dmg); }
@@ -2494,6 +2618,19 @@ function paintSheet(ctx, H, measure){
     eg.qa.forEach((q,i)=>{ line("问"+(i+1), q.label+"——"+q.effect); });
     line("显现描述", eg.description||"—");
   }
+
+  label("敌方意图速查");
+  ENEMY_INTENTS.forEach(t=>line(t.name, t.rule));
+  INTENT_OPS.forEach(t=>line(t.name, t.rule));
+
+  label("鉴定速查");
+  CHECK_RULES.forEach(t=>line(t.name, t.rule));
+  checkOddsTable().forEach(m=>line(m.mode+"通过率",
+    m.note+"；属性1~4 在难度1/2/3 下 "+m.rows.map(r=>r.odds.join("/")).join(" · ")));
+
+  label("罪孽压力速查");
+  SIN_PRESSURE_RULES.forEach(t=>line(t.name, t.rule));
+  line("本角色通过率", state.attrs.意志+" 次机会 · "+willCheckTable().map(r=>`难度${r.dc} ${r.text}`).join(" · "));
 
   label("攻击模式");
   line("A 组", groupModeDesc("a"));
@@ -2617,6 +2754,52 @@ const DEPRECATED_OPTIONS = [
   // 「压制」原为「目标不能对第二次攻击进行防御」——会触发无防御卡规则、差值暴涨，改为定额加伤
   {sin:"pride", trait:"multiAttack", level:"small", q:1, o:1},
   {sin:"pride", trait:"multiAttack", level:"large", q:1, o:1},
+  // 高伤技能加压力代价 / 新增降压力选项
+  {sin:"wrath", trait:"attack", level:"large", q:1, o:2},
+  {sin:"gluttony", trait:"attack", level:"large", q:1, o:2},
+  {sin:"gloom", trait:"attack", level:"large", q:1, o:0},
+  {sin:"envy", trait:"attack", level:"large", q:2, o:0},
+  {sin:"lust", trait:"attack", level:"small", q:1, o:0},
+  {sin:"lust", trait:"attack", level:"large", q:1, o:0},
+  {sin:"sloth", trait:"shield", level:"small", q:1, o:2},
+  {sin:"sloth", trait:"shield", level:"large", q:1, o:2},
+  // 延后意图 / 意图转向 / 罪孽压力双向
+  {sin:"sloth", trait:"shield", level:"small", q:1, o:1},
+  {sin:"sloth", trait:"shield", level:"large", q:1, o:1},
+  {sin:"envy", trait:"support", level:"small", q:1, o:2},
+  {sin:"envy", trait:"support", level:"large", q:1, o:2},
+  {sin:"lust", trait:"buff", level:"large", q:2, o:1},
+  {sin:"gluttony", trait:"special", level:"small", q:1, o:1},
+  {sin:"gluttony", trait:"special", level:"large", q:1, o:1},
+  {sin:"gloom", trait:"attack", level:"small", q:1, o:1},
+  {sin:"gloom", trait:"attack", level:"large", q:1, o:1},
+  {sin:"pride", trait:"attack", level:"large", q:2, o:0},
+  // 多样性审计：三选项等价 / 跨罪孽撞车 的重写
+  {sin:"gluttony", trait:"special", level:"small", q:0, o:0},
+  {sin:"gluttony", trait:"special", level:"small", q:0, o:1},
+  {sin:"gluttony", trait:"special", level:"large", q:0, o:0},
+  {sin:"gluttony", trait:"special", level:"large", q:0, o:1},
+  {sin:"gluttony", trait:"attack", level:"large", q:2, o:0},
+  {sin:"sloth", trait:"shield", level:"small", q:0, o:1},
+  {sin:"sloth", trait:"shield", level:"small", q:0, o:2},
+  {sin:"sloth", trait:"shield", level:"large", q:0, o:1},
+  {sin:"sloth", trait:"shield", level:"large", q:0, o:2},
+  {sin:"wrath", trait:"defense", level:"small", q:0, o:2},
+  {sin:"wrath", trait:"defense", level:"large", q:0, o:2},
+  {sin:"wrath", trait:"defense", level:"small", q:1, o:2},
+  {sin:"wrath", trait:"defense", level:"large", q:1, o:2},
+  {sin:"wrath", trait:"defense", level:"large", q:2, o:2},
+  {sin:"envy", trait:"defense", level:"large", q:2, o:2},
+  // 「毁掉」改为打断增益/减益意图
+  {sin:"envy", trait:"attack", level:"small", q:1, o:2},
+  {sin:"envy", trait:"attack", level:"large", q:1, o:2},
+  // 引入敌方意图类型后：新增驱散效果、「全面压制」改为无视防御意图、嫉妒·辅助重做
+  {sin:"lust", trait:"buff", level:"small", q:1, o:1},
+  {sin:"lust", trait:"buff", level:"large", q:1, o:1},
+  {sin:"envy", trait:"support", level:"large", q:2, o:0},
+  {sin:"pride", trait:"attack", level:"small", q:1, o:1},
+  {sin:"pride", trait:"attack", level:"large", q:1, o:1},
+  {sin:"pride", trait:"multiAttack", level:"large", q:2, o:0},
   // 多重攻击的加骰改为加伤：两次攻击叠加拼点骰会让命中率逼近必中
   {sin:"pride", trait:"multiAttack", level:"small", q:0, o:1},
   {sin:"pride", trait:"multiAttack", level:"large", q:0, o:1},
