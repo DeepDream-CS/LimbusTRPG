@@ -198,12 +198,38 @@ const CARD_SKILL_BASE = {
 
 /* 多重攻击：本卡自身的基础伤害。追加的那张卡用该罪孽「攻击·小技能」的值 */
 const MULTI_ATTACK_OWN = {small:2, large:4};
-/* 多重攻击追加的那张卡——导出时需要与主卡一起列出 */
+/* 「精益求精」在大技能第三问的第二个选项：追加卡也获得本卡的一条特效，
+   需要玩家再指定是哪一条，因此额外存一个 extraEffect（记的是问题序号，
+   这样之后改了那一问的答案，分给追加卡的特效会自动跟着变）。 */
+const REFINE_Q = 2, REFINE_O = 1;
+function needsExtraEffectPick(entry, level){
+  return !!entry && entry.trait==="multiAttack" && level==="large" && entry.answers?.[REFINE_Q]===REFINE_O;
+}
+/* 可供分配的特效：本卡前两问已选中的答案（第三问就是精益求精本身，不能自指） */
+function extraEffectChoices(sinKey, entry, level){
+  const qa = getSinQA(sinKey, "multiAttack", level);
+  const out = [];
+  for(const qi of [0,1]){
+    const ai = entry.answers?.[qi];
+    if(ai!=null && qa[qi]?.options?.[ai]) out.push({qi, ...qa[qi].options[ai]});
+  }
+  return out;
+}
+function pickedExtraEffect(sinKey, entry, level){
+  if(!needsExtraEffectPick(entry, level)) return null;
+  return extraEffectChoices(sinKey, entry, level).find(c=>c.qi===entry.extraEffect) || null;
+}
+
+/* 多重攻击追加的那张卡：该罪孽的普通攻击（基础卡，无问答特效）——导出时与主卡一起列出 */
 function extraAttackCard(sinKey, gid){
+  const entry = state.cardGroups[gid]?.[sinKey] || {};
+  const level = state.sins.values[sinKey]>=3 ? "large" : "small";
+  const granted = pickedExtraEffect(sinKey, entry, level);
   return {
-    name: `${SIN_LABELS[sinKey]} · 攻击（小技能）`,
+    name: `${SIN_LABELS[sinKey]} · 普通攻击`,
     note: "由多重攻击追加",
-    effect: `基础伤害 ${sinAttackDamage(sinKey,"small")} + 差值`,
+    effect: `基础伤害 ${sinAttackDamage(sinKey,"basic")} + 差值`,
+    granted: granted ? {label:granted.label, effect:granted.effect} : null,
     clash: getClashInfo("attack", gid)
   };
 }
@@ -216,9 +242,9 @@ function cardBaseEffect(trait, sinKey){
 function cardSkillBase(trait, sinKey, level){
   if(trait==="attack") return `基础伤害 ${sinAttackDamage(sinKey,level)} + 差值`;
   if(trait==="multiAttack"){
-    return `本回合额外加入一张「${SIN_LABELS[sinKey]} · 攻击（小技能）」并一并打出，`
+    return `本回合额外加入一张「${SIN_LABELS[sinKey]} · 普通攻击」并一并打出，`
       + `共发动两次攻击、各自独立拼点。本卡基础伤害 ${MULTI_ATTACK_OWN[level]} + 差值；`
-      + `追加卡基础伤害 ${sinAttackDamage(sinKey,"small")} + 差值`;
+      + `追加卡基础伤害 ${sinAttackDamage(sinKey,"basic")} + 差值`;
   }
   return CARD_SKILL_BASE[trait]?.[level]||"";
 }
@@ -1108,8 +1134,11 @@ function reconcileCardGroups(){
           g[k].answers=[];
         }
         // 问答数不匹配时截断
-        const expected=g[k].trait? getSinQA(k,g[k].trait,val>=3?"large":val>=2?"small":"basic").length : 0;
+        const lv2 = val>=3?"large":val>=2?"small":"basic";
+        const expected=g[k].trait? getSinQA(k,g[k].trait,lv2).length : 0;
         if(g[k].answers.length>expected) g[k].answers.length=expected;
+        // 不再需要「精益求精」的分配时清掉，避免残留一个无处安放的选择
+        if(g[k].extraEffect!=null && !needsExtraEffectPick(g[k],lv2)) delete g[k].extraEffect;
       }
     }
   }
@@ -1124,9 +1153,12 @@ function validateCardGroup(gid){
     if(val===0) continue;
     if(!g[k]||!g[k].trait) errors.push(`${SIN_LABELS[k]}尚未选择特性。`);
     else {
-      const expected=getSinQA(k,g[k].trait,val>=3?"large":val>=2?"small":"basic").length;
+      const lv=val>=3?"large":val>=2?"small":"basic";
+      const expected=getSinQA(k,g[k].trait,lv).length;
       if(g[k].answers.length<expected || g[k].answers.some(a=>a===null||a===undefined)){
         errors.push(`${SIN_LABELS[k]}·${TRAIT_LABELS[g[k].trait]}的技能问答尚未完成。`);
+      } else if(needsExtraEffectPick(g[k],lv) && !pickedExtraEffect(k,g[k],lv)){
+        errors.push(`${SIN_LABELS[k]}·多重攻击尚未指定「精益求精」分给追加卡的特效。`);
       }
     }
   }
@@ -1251,6 +1283,7 @@ function validateCardGroupQA(gid){
     const level=val>=3?"large":val>=2?"small":"basic";
     const expected=getSinQA(k,g[k].trait,level).length;
     if(g[k].answers.length<expected || g[k].answers.some(a=>a===null||a===undefined)) return false;
+    if(needsExtraEffectPick(g[k],level) && !pickedExtraEffect(k,g[k],level)) return false;
   }
   return true;
 }
@@ -2110,6 +2143,21 @@ function renderCardQA(body,gid){
       <div class="qa-options">${optsHtml}</div>
     </div>`;
   }).join("");
+  // 「精益求精」要额外指定把哪条特效分给追加卡
+  let refineHtml = "";
+  if(needsExtraEffectPick(entry, level)){
+    const choices = extraEffectChoices(sinKey, entry, level);
+    const ex = extraAttackCard(sinKey, gid);
+    refineHtml = `<div class="qa-block">
+      <div class="qa-question">追加：把哪一条特效分给「${ex.name}」？</div>
+      ${choices.length ? `<div class="qa-options">${choices.map(c=>`
+        <div class="qa-option${entry.extraEffect===c.qi?" sel":""}" data-extra="${c.qi}">
+          <div class="qa-opt-label">来自问题 ${c.qi+1} · ${c.label}</div>
+          <div class="qa-opt-effect">${c.effect}</div>
+        </div>`).join("")}</div>`
+        : `<p class="hint">请先回答前两问，才能决定分配哪条特效。</p>`}
+    </div>`;
+  }
   body.innerHTML=`
     <p class="lead">${groupLabel}组（${modeLabel}模式）· ${cardGroupIdx+1} / ${qaSins.length} — 「${SIN_LABELS[sinKey]}」·${TRAIT_LABELS[entry.trait]}·${levelLabel}</p>
     <div class="sin-card sin-${sinKey}" style="margin-bottom:12px">
@@ -2121,6 +2169,7 @@ function renderCardQA(body,gid){
       <p class="sin-summary"><b>基础效果：</b>${baseEffect}</p>
     </div>
     ${qaHtml}
+    ${refineHtml}
     <div class="reader-nav" style="margin-top:16px">
       <button class="btn ghost" id="qaPrev" ${cardGroupIdx===0?'disabled':''}>← 上一个</button>
       <div class="dots-row" id="qaDots"></div>
@@ -2129,13 +2178,12 @@ function renderCardQA(body,gid){
         :`<button class="btn primary" id="qaDone">完成问答 →</button>`}
     </div>
   `;
-  // 选项点击
+  // 选项点击（含「精益求精」的特效分配）
   body.querySelectorAll(".qa-option").forEach(el=>{
     el.onclick=()=>{
-      const qi=parseInt(el.dataset.q,10);
-      const oi=parseInt(el.dataset.o,10);
       if(!g[sinKey]) g[sinKey]={trait:entry.trait,answers:[]};
-      g[sinKey].answers[qi]=oi;
+      if(el.dataset.extra!=null){ g[sinKey].extraEffect=parseInt(el.dataset.extra,10); render(); return; }
+      g[sinKey].answers[parseInt(el.dataset.q,10)]=parseInt(el.dataset.o,10);
       render();
     };
   });
@@ -2228,6 +2276,7 @@ function renderCardPreview(body){
           </div>
           <div class="card-clash"><span class="pill core">拼点</span> ${ex.clash.formula}<br><span class="card-dmg">${ex.clash.dmg}</span></div>
           <div class="card-effect">${ex.effect}</div>
+          ${ex.granted?`<div class="card-effect">▸ <b>${ex.granted.label}</b>——${ex.granted.effect} <span class="pill core">精益求精分配</span></div>`:''}
         </div>`;
       }
       return html;
@@ -2297,7 +2346,7 @@ function renderStep3(){
       let row=`<tr><td class="c-sin"><span class="sin-icon-inline">${sinIcon(k)}</span>${SIN_LABELS[k]}</td><td class="c-lv">${levelText}</td><td class="c-tr">${traitText}${clashTag?`<br>${clashTag}`:''}</td><td>${effectLines||'—'}${clashDetail}</td></tr>`;
       if(entry.trait==="multiAttack"){
         const ex=extraAttackCard(k,gid);
-        row+=`<tr><td class="c-sin" style="padding-left:24px"><span class="sin-icon-inline">${sinIcon(k)}</span>${SIN_LABELS[k]}</td><td class="c-lv">追加</td><td class="c-tr">攻击<br><span class="pill core">拼点</span></td><td>${ex.effect}<br><span style="color:var(--accent-2);font-size:12px">${ex.clash.formula}</span><br><span style="color:var(--accent-2);font-size:12px">${ex.clash.dmg}</span><br><span style="color:var(--muted);font-size:12px">${ex.note}</span></td></tr>`;
+        row+=`<tr><td class="c-sin" style="padding-left:24px"><span class="sin-icon-inline">${sinIcon(k)}</span>${SIN_LABELS[k]}</td><td class="c-lv">追加</td><td class="c-tr">攻击<br><span class="pill core">拼点</span></td><td>${ex.effect}${ex.granted?`<br>▸ <b>${ex.granted.label}</b>——${ex.granted.effect}（精益求精分配）`:''}<br><span style="color:var(--accent-2);font-size:12px">${ex.clash.formula}</span><br><span style="color:var(--accent-2);font-size:12px">${ex.clash.dmg}</span><br><span style="color:var(--muted);font-size:12px">${ex.note}</span></td></tr>`;
       }
       return row;
     }).join("");
@@ -2670,6 +2719,7 @@ function paintSheet(ctx, H, measure){
         indent("拼点："+ex.clash.formula,"#c8a24b");
         indent("伤害："+ex.clash.dmg,"#c8a24b");
         indent("▸ "+ex.effect);
+        if(ex.granted) indent("▸ "+ex.granted.label+"——"+ex.granted.effect+"（精益求精分配）");
       }
       y+=8;
     });
