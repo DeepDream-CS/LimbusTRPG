@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Limbus Company TRPG · 鉴定器</title>
-<link rel="stylesheet" href="建卡器.css">
+<link rel="stylesheet" href="建卡器.css?v=2">
 </head>
 <body>
 <div class="app">
@@ -64,16 +64,17 @@
         <button class="btn" id="btnLoad">⇩ 从建卡器读取</button>
       </div>
       <div id="attrEdit"></div>
-      <h3 style="margin-top:18px">核心罪孽（优势）</h3>
+      <h3 class="sec-head" style="margin-top:18px">核心罪孽（优势）<span id="coreCount"></span></h3>
       <div class="sin-chips" id="coreEdit"></div>
-      <h3 style="margin-top:18px">排斥罪孽（劣势）</h3>
+      <h3 class="sec-head" style="margin-top:18px">排斥罪孽（劣势）<span id="rejCount"></span></h3>
       <div class="sin-chips" id="rejEdit"></div>
-      <p class="hint">可多选。优势 / 劣势只在「罪孽鉴定」时生效。</p>
+      <p class="hint">优势最多 1 个、劣势最多 4 个；再点一次可取消。只在「罪孽鉴定」时生效。</p>
+      <div class="export-row"><button class="btn ghost" id="btnClearSins">↺ 清空优势 / 劣势</button></div>
     </div>
   </aside>
 </div>
 
 <div class="toast" id="toast"></div>
-<script src="鉴定器.js"></script>
+<script src="鉴定器.js?v=2"></script>
 </body>
 </html>

@@ -17,6 +17,7 @@ const CHECK_MODES = {
   dis:   {label:"劣势", p:0.5,  mul:2}
 };
 const STORAGE_KEY = "limbus-trpg-character";   // 与建卡器共用，便于直接读档
+const MAX_REJECTED = 4;                        // 劣势罪孽上限
 
 const state = {
   attrs:{力量:1,灵巧:1,体魄:1,认知:1,意志:1,共感:1},
@@ -89,22 +90,29 @@ function renderSetup(){
     renderAll();
   });
 
-  // 核心罪孽（单选，再点取消）
+  // 核心罪孽：单选，再点一次取消
+  $("coreCount").textContent = state.core ? "已选 1 / 1" : "未选";
   $("coreEdit").innerHTML = SIN_ORDER.map(k=>
     `<span class="sinchip ${SIN_CLASS[k]}${state.core===k?" on":""}" data-core="${k}">${SIN_LABELS[k]}</span>`).join("");
   $("coreEdit").querySelectorAll("[data-core]").forEach(el=>el.onclick=()=>{
     const k=el.dataset.core;
-    state.core = state.core===k ? null : k;
-    state.rejected = state.rejected.filter(x=>x!==k);   // 不能同时是优势和劣势
+    state.core = state.core===k ? null : k;           // 单选：选中别的会自动顶掉原来的
+    state.rejected = state.rejected.filter(x=>x!==k); // 不能同时是优势和劣势
     renderAll();
   });
 
-  // 排斥罪孽（多选）
-  $("rejEdit").innerHTML = SIN_ORDER.map(k=>
-    `<span class="sinchip ${SIN_CLASS[k]}${state.rejected.includes(k)?" on":""}" data-rej="${k}">${SIN_LABELS[k]}</span>`).join("");
+  // 排斥罪孽：多选，上限 MAX_REJECTED，再点一次取消
+  const rejFull = state.rejected.length >= MAX_REJECTED;
+  $("rejCount").textContent = `已选 ${state.rejected.length} / ${MAX_REJECTED}`;
+  $("rejEdit").innerHTML = SIN_ORDER.map(k=>{
+    const on = state.rejected.includes(k);
+    // 已满时把未选中的置灰，让上限一眼可见
+    return `<span class="sinchip ${SIN_CLASS[k]}${on?" on":(rejFull?" full":"")}" data-rej="${k}">${SIN_LABELS[k]}</span>`;
+  }).join("");
   $("rejEdit").querySelectorAll("[data-rej]").forEach(el=>el.onclick=()=>{
     const k=el.dataset.rej;
-    if(state.rejected.includes(k)) state.rejected=state.rejected.filter(x=>x!==k);
+    if(state.rejected.includes(k)){ state.rejected=state.rejected.filter(x=>x!==k); }
+    else if(state.rejected.length>=MAX_REJECTED){ toast(`劣势罪孽最多 ${MAX_REJECTED} 个`); return; }
     else { state.rejected.push(k); if(state.core===k) state.core=null; }
     renderAll();
   });
@@ -203,6 +211,7 @@ $("btnRoll").onclick = ()=>{
   renderHistory();
 };
 $("btnClearLog").onclick = ()=>{ state.history=[]; $("result").innerHTML=""; renderHistory(); };
+$("btnClearSins").onclick = ()=>{ state.core=null; state.rejected=[]; renderAll(); toast("已清空优势 / 劣势"); };
 
 /* 直接读建卡器存在 localStorage 里的角色 */
 $("btnLoad").onclick = ()=>{
@@ -211,7 +220,7 @@ $("btnLoad").onclick = ()=>{
   if(!d){ toast("没有找到建卡器的存档"); return; }
   if(d.attrs) ATTRS.forEach(k=>{ if(d.attrs[k]) state.attrs[k]=d.attrs[k]; });
   state.core = d.sins?.coreSin || null;
-  state.rejected = [...(d.sins?.rejectedSins||[])];
+  state.rejected = [...(d.sins?.rejectedSins||[])].slice(0, MAX_REJECTED);
   renderAll();
   toast(`已读取${d.name?`「${d.name}」`:"存档"}`);
 };

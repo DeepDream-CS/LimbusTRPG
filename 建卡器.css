@@ -281,6 +281,9 @@ button:focus-visible,.subchip:focus-visible,.rdot:focus-visible,.dot:focus-visib
 .sinchip:hover{border-color:var(--accent);border-left-color:var(--sin-c,var(--accent))}
 .sinchip.on{color:var(--text);background:rgba(200,162,75,.14);border-color:var(--accent);font-weight:600}
 .sinchip small{display:block;font-size:10px;opacity:.7;margin-top:1px}
+.sinchip.full{opacity:.4;cursor:not-allowed}
+.summary h3.sec-head{display:flex;justify-content:space-between;align-items:baseline}
+.summary h3.sec-head span{font-size:12px;font-weight:400;color:var(--muted);letter-spacing:0}
 
 .roll-log{display:flex;flex-direction:column;gap:4px;margin:4px 0 12px}
 .roll-step{display:flex;align-items:center;gap:8px;font-size:13px}
