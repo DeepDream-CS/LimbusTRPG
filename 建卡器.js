@@ -1,20 +1,13 @@
 /* ============ 数据模型 ============ */
 const ATTR_DEFS = [
   {key:"力量", use:"近战蛮力、搬运、破坏、压制、抵抗击退"},
-  {key:"灵巧", use:"速度、反应、射击、潜行、精密操作"},
+  {key:"灵巧", use:"反应、射击、潜行、精密操作、临场闪避"},
   {key:"体魄", use:"生命值、耐力、抵抗毒素和身体异常"},
   {key:"认知", use:"观察、调查、知识、技术、分析敌人机制"},
   {key:"意志", use:"精神稳定、忍耐、抵抗恐惧、驾驭E.G.O"},
   {key:"共感", use:"说服、威胁、识人、欺骗、支援他人"},
 ];
 const LEVEL_MEANING = {1:"明显不擅长",2:"普通成年人",3:"接受过专业训练",4:"行业中的优秀人物",5:"都市中的非正常水平"};
-const SPEED_TABLE = {
-  1:{range:"1—3",dice:"1D3"},
-  2:{range:"2—4",dice:"1D3＋1"},
-  3:{range:"2—5",dice:"1D4＋1"},
-  4:{range:"3—6",dice:"1D4＋2"},
-  5:{range:"4—7",dice:"1D4＋3"},
-};
 const BASE_POINTS = 8;      // 额外可分配点数
 const TOTAL_TARGET = 14;    // 六项总和固定
 
@@ -56,17 +49,16 @@ const SIN_MAX = 3;      // 单项上限
 /* ============ 罪孽卡片系统数据 ============ */
 
 /* 攻击模式（6.2）
-   speed 决定该模式下如何取得接线权（拦下敌人的攻击）：
-     roll   斩击 —— 按属性查 SPEED_TABLE 投骰，速度 ≥ 敌方速度时可接线
-     fixed  突刺 —— 速度恒等于属性值，不投骰
-     ignore 打击 —— 无视速度无条件接线，代价是防御拼点减值 */
+   bonus 是该模式在本组所有拼点中持续生效的副效果——三条形状不同：
+   斩击提高命中率、打击提高收益、突刺提供保底。 */
 const ATTACK_MODES = {
-  slash:  {label:"斩击", attr:"灵巧", desc:"以速度与精准斩开对手", speed:"roll"},
-  strike: {label:"打击", attr:"力量", desc:"以沉重力量碾压对手", speed:"ignore"},
-  pierce: {label:"突刺", attr:"认知", desc:"以精准判断直取要害", speed:"fixed"}
+  slash:  {label:"斩击", attr:"灵巧", desc:"以迅捷与精准斩开对手",
+           bonus:"本组的所有拼点骰 +1"},
+  strike: {label:"打击", attr:"力量", desc:"以沉重力量碾压对手",
+           bonus:"本组拼点胜利时，本次伤害额外 +2"},
+  pierce: {label:"突刺", attr:"认知", desc:"以精准判断直取要害",
+           bonus:"本组拼点失败时，你仍对对方造成 3 点伤害"}
 };
-/* 打击模式无条件接线的代价：力量越高罚得越轻，避免用 1 点力量白嫖接线权 */
-const STRIKE_CLASH_PENALTY = {1:-4, 2:-3, 3:-2, 4:-1, 5:-1};
 
 /* 罪孽特性可用表（7.2） */
 const SIN_TRAIT_OPTIONS = {
@@ -88,13 +80,29 @@ const TRAIT_LABELS = {
   counter:"反击"
 };
 
-/* 基础卡片数值（7.5-7.7） */
+/* 各罪孽攻击卡的基础伤害分档。
+   问答能加的伤害各罪孽差很多（暴怒+9 / 嫉妒+10 / 傲慢+3），
+   所以基础值反向配平，保证暴怒在单体和群体上都是最高的那个。 */
+const SIN_ATTACK_DAMAGE = {
+  wrath:   {basic:3, small:5, large:8},   // 纯输出，问答加成也最高 → 合计 17
+  gluttony:{basic:3, small:5, large:7},   // 问答几乎不加伤，靠基础值站住 → 12
+  pride:   {basic:3, small:4, large:7},   // 伤害走多重攻击，普通攻击偏控制 → 10
+  lust:    {basic:2, small:4, large:6},   // 治疗/辅助混合 → 13
+  gloom:   {basic:2, small:4, large:6},   // 以减益为主 → 14
+  envy:    {basic:2, small:3, large:5}    // 条件爆发最高，基础压最低 → 15
+};
+/* 取某罪孽某等级的攻击基础伤害；非攻击特性或未收录的罪孽回退到通用值 */
+function sinAttackDamage(sinKey, level){
+  return SIN_ATTACK_DAMAGE[sinKey]?.[level] ?? {basic:3, small:5, large:8}[level];
+}
+
+/* 基础卡片数值（7.5-7.7）。attack 的数值按罪孽分档，见 cardBaseEffect / cardSkillBase */
 const CARD_BASE_EFFECT = {
-  attack:"拼点胜利 → 造成 3 + 差值 的伤害",
+  attack:"基础伤害 3 + 差值",
   defense:"拼点胜利 → 完全格挡；失败 → 你恢复 2 HP",
   buff:"你或一名友方立即恢复 2 HP",
   shield:"拼点胜利 → 友方不受伤害；失败 → 你替友方受全部伤害，你获得 2 临时生命",
-  debuff:"一名敌人本轮拼点骰 -1",
+  debuff:"一名敌人本轮意图值 -1",
   support:"你或一名友方本轮拼点骰 +1",
   counter:"拼点胜利 → 完全格挡，并对攻击者造成 3 点伤害；失败 → 你获得 2 点临时生命"
 };
@@ -105,12 +113,40 @@ const CARD_SKILL_BASE = {
   // 援护大技能：满组时的一次性倾泻。条件与【切换】写在基础效果里，第三问只负责收益分支
   shield:     {small:"拼点胜利→友方不受伤害，你获得3临时生命；失败→你替友方受全部伤害，你获得5临时生命", large:"【仅当本组所有卡片均未使用时可打出】弃掉本组其余全部卡片，每弃掉一张你获得 3 点临时生命；拼点胜利→友方不受伤害；失败→你替友方受全部伤害。结算后【切换】到另一组卡片"},
   // 反击大技能：空组时的爆发，把攒下的壳一次性换成伤害，与援护构成循环的两端
-  counter:    {small:"拼点胜利 → 完全格挡并对攻击者造成 5 点伤害；失败 → 你获得 3 点临时生命", large:"【仅当本组已无其他可用卡时可打出】消耗你当前全部临时生命（含本卡获得的），本次反击基础伤害 ＝ 5 ＋ 消耗掉的点数，其中由临时生命转化的部分最多 +4。拼点胜利 → 完全格挡并造成 基础伤害 ＋ 差值；拼点失败 → 你照常受到伤害，但仍对攻击者造成基础伤害的一半（向下取整）。结算后【切换】到另一组卡片"},
-  debuff:     {small:"一名敌人本轮拼点骰 -2", large:"一名敌人本轮拼点骰 -3"},
+  counter:    {small:"拼点胜利 → 完全格挡并对攻击者造成 5 点伤害；失败 → 你获得 3 点临时生命", large:"【仅当本组已无其他可用卡时可打出】消耗你当前全部临时生命（含本卡获得的），本次反击基础伤害 = 5 + 消耗掉的点数，其中由临时生命转化的部分最多 +4。拼点胜利 → 完全格挡并造成 基础伤害 + 差值（差值 = 拼点值 - 意图值）；拼点失败 → 你照常受到伤害，但仍对攻击者造成基础伤害的一半（向下取整）。结算后【切换】到另一组卡片"},
+  debuff:     {small:"一名敌人本轮意图值 -2", large:"一名敌人本轮意图值 -3"},
   support:    {small:"拼点骰+2", large:"拼点骰+3"},
   special:    {small:"弃掉一张未使用卡片，恢复3HP", large:"弃掉两张未使用卡片，恢复5HP"},
-  multiAttack:{small:"额外消耗本组一张未使用的基础攻击卡，本回合发动两次攻击、各自独立拼点，每次基础伤害3；无基础攻击卡可消耗时只发动一次，基础伤害5", large:"额外消耗本组一张未使用的基础攻击卡，本回合发动两次攻击、各自独立拼点，每次基础伤害4；无基础攻击卡可消耗时只发动一次，基础伤害8"}
+  // multiAttack 的文案由 cardSkillBase() 动态拼，见 MULTI_ATTACK_OWN
+  multiAttack:{small:"", large:""}
 };
+
+/* 多重攻击：本卡自身的基础伤害。追加的那张卡用该罪孽「攻击·小技能」的值 */
+const MULTI_ATTACK_OWN = {small:2, large:4};
+/* 多重攻击追加的那张卡——导出时需要与主卡一起列出 */
+function extraAttackCard(sinKey, gid){
+  return {
+    name: `${SIN_LABELS[sinKey]} · 攻击（小技能）`,
+    note: "由多重攻击追加",
+    effect: `基础伤害 ${sinAttackDamage(sinKey,"small")} + 差值`,
+    clash: getClashInfo("attack", gid)
+  };
+}
+
+/* 卡面效果取值：攻击卡按罪孽查分档表，其余特性沿用通用表 */
+function cardBaseEffect(trait, sinKey){
+  if(trait==="attack") return `基础伤害 ${sinAttackDamage(sinKey,"basic")} + 差值`;
+  return CARD_BASE_EFFECT[trait]||"";
+}
+function cardSkillBase(trait, sinKey, level){
+  if(trait==="attack") return `基础伤害 ${sinAttackDamage(sinKey,level)} + 差值`;
+  if(trait==="multiAttack"){
+    return `本回合额外加入一张「${SIN_LABELS[sinKey]} · 攻击（小技能）」并一并打出，`
+      + `共发动两次攻击、各自独立拼点。本卡基础伤害 ${MULTI_ATTACK_OWN[level]} + 差值；`
+      + `追加卡基础伤害 ${sinAttackDamage(sinKey,"small")} + 差值`;
+  }
+  return CARD_SKILL_BASE[trait]?.[level]||"";
+}
 
 /* 七罪技能特效问答数据（8.1-8.7） */
 const SIN_TRAIT_QA = {
@@ -120,7 +156,7 @@ const SIN_TRAIT_QA = {
         {question:"你的怒火从何而来？",options:[
           {label:"愤怒",effect:"伤害 +2"},
           {label:"燃烧",effect:"命中后目标在本轮结束时受到 2 点灼烧伤害"},
-          {label:"重压",effect:"目标的防御拼点骰 -1"}
+          {label:"重压",effect:"本次意图值 -1"}
         ]},
         {question:"它让你能够____。",options:[
           {label:"尽情释放",effect:"你的拼点骰 +1"},
@@ -150,8 +186,8 @@ const SIN_TRAIT_QA = {
       small:[
         {question:"你如何以怒还怒？",options:[
           {label:"反击",effect:"防御胜利时，对攻击者造成 3 点伤害"},
-          {label:"震慑",effect:"攻击者本轮拼点骰 -1"},
-          {label:"蛮力",effect:"防御胜利时，攻击者本轮当前速度 -2"}
+          {label:"震慑",effect:"本次意图值 -1"},
+          {label:"蛮力",effect:"防御胜利时，攻击者本轮受到的伤害 +2"}
         ]},
         {question:"你的防线由什么构成？",options:[
           {label:"暴戾",effect:"你的防御拼点骰 +1"},
@@ -162,8 +198,8 @@ const SIN_TRAIT_QA = {
       large:[
         {question:"你如何以怒还怒？",options:[
           {label:"反击",effect:"防御胜利时，对攻击者造成 5 点伤害"},
-          {label:"震慑",effect:"攻击者本轮拼点骰 -2"},
-          {label:"蛮力",effect:"防御胜利时，攻击者本轮当前速度 -3"}
+          {label:"震慑",effect:"本次意图值 -2"},
+          {label:"蛮力",effect:"防御胜利时，攻击者本轮受到的伤害 +3"}
         ]},
         {question:"你的防线由什么构成？",options:[
           {label:"暴戾",effect:"你的防御拼点骰 +2"},
@@ -184,7 +220,7 @@ const SIN_TRAIT_QA = {
         {question:"你的攻击中蕴含什么？",options:[
           {label:"魅力",effect:"命中后一名友方恢复 2 HP"},
           {label:"执念",effect:"命中后你的拼点骰 +1（本次攻击中立即生效）"},
-          {label:"诱惑",effect:"目标本轮拼点骰 -1"}
+          {label:"诱惑",effect:"本次意图值 -1"}
         ]},
         {question:"你从中得到了什么？",options:[
           {label:"满足",effect:"命中后你恢复 2 HP"},
@@ -196,7 +232,7 @@ const SIN_TRAIT_QA = {
         {question:"你的攻击中蕴含什么？",options:[
           {label:"魅力",effect:"命中后一名友方恢复 4 HP"},
           {label:"执念",effect:"你的拼点骰 +2"},
-          {label:"诱惑",effect:"目标本轮拼点骰 -2"}
+          {label:"诱惑",effect:"本次意图值 -2"}
         ]},
         {question:"你从中得到了什么？",options:[
           {label:"满足",effect:"命中后你恢复 4 HP"},
@@ -215,7 +251,7 @@ const SIN_TRAIT_QA = {
         {question:"你想强化什么？",options:[
           {label:"锋芒",effect:"你或一名友方本轮拼点骰 +2"},
           {label:"坚韧",effect:"你或一名友方获得 3 点临时生命"},
-          {label:"敏锐",effect:"你或一名友方本轮当前速度 +2"}
+          {label:"敏锐",effect:"你或一名友方本轮受到的伤害 -2"}
         ]},
         {question:"增益的代价是什么？",options:[
           {label:"微痛",effect:"你受到 1 点伤害，效果数值 +1"},
@@ -227,7 +263,7 @@ const SIN_TRAIT_QA = {
         {question:"你想强化什么？",options:[
           {label:"锋芒",effect:"你或一名友方本轮拼点骰 +3"},
           {label:"坚韧",effect:"你或一名友方获得 5 点临时生命"},
-          {label:"敏锐",effect:"你或一名友方本轮当前速度 +3"}
+          {label:"敏锐",effect:"你或一名友方本轮受到的伤害 -3"}
         ]},
         {question:"增益的代价是什么？",options:[
           {label:"微痛",effect:"你受到 2 点伤害，效果数值 +2"},
@@ -313,7 +349,7 @@ const SIN_TRAIT_QA = {
       small:[
         {question:"你要吞噬什么？",options:[
           {label:"血肉",effect:"命中后你恢复等同于造成伤害一半的 HP（向下取整）"},
-          {label:"力量",effect:"目标本轮拼点骰 -1"},
+          {label:"力量",effect:"本次意图值 -1"},
           {label:"养分",effect:"你立即恢复 3 HP（无论是否命中）"}
         ]},
         {question:"你的胃口有多大？",options:[
@@ -325,7 +361,7 @@ const SIN_TRAIT_QA = {
       large:[
         {question:"你要吞噬什么？",options:[
           {label:"血肉",effect:"命中后你恢复等同于造成伤害一半的 HP（向下取整）"},
-          {label:"力量",effect:"目标本轮拼点骰 -2"},
+          {label:"力量",effect:"本次意图值 -2"},
           {label:"养分",effect:"你立即恢复 5 HP（无论是否命中）"}
         ]},
         {question:"你的胃口有多大？",options:[
@@ -381,7 +417,7 @@ const SIN_TRAIT_QA = {
         {question:"循环加速后你得到什么？",options:[
           {label:"饥饿感",effect:"你本轮拼点骰 +1"},
           {label:"满足感",effect:"你额外恢复 2 HP"},
-          {label:"空虚感",effect:"你受到 1 点伤害，但本轮当前速度 +2"}
+          {label:"空虚感",effect:"你受到 1 点伤害，但本轮你的所有恢复效果 +2"}
         ]}
       ],
       large:[
@@ -393,7 +429,7 @@ const SIN_TRAIT_QA = {
         {question:"循环加速后你得到什么？",options:[
           {label:"饥饿感",effect:"你本轮拼点骰 +2"},
           {label:"满足感",effect:"你额外恢复 3 HP"},
-          {label:"空虚感",effect:"你受到 2 点伤害，但本轮当前速度 +3"}
+          {label:"空虚感",effect:"你受到 2 点伤害，但本轮你的所有恢复效果 +3"}
         ]},
         {question:"贪婪的尽头是？",options:[
           {label:"鲸吞",effect:"弃掉当前组中所有剩余未使用卡片，你恢复等同于弃掉卡片数×2的HP，当前组立即刷新"},
@@ -407,62 +443,62 @@ const SIN_TRAIT_QA = {
     attack:{
       small:[
         {question:"你的痛苦如何伤害他人？",options:[
-          {label:"腐蚀",effect:"目标本轮拼点骰 -1"},
-          {label:"沉重",effect:"命中后目标本轮当前速度 -2"},
+          {label:"腐蚀",effect:"本次意图值 -1"},
+          {label:"沉重",effect:"命中后目标本轮不能接线"},
           {label:"侵蚀",effect:"命中后目标本轮不能恢复 HP、不能获得临时生命"}
         ]},
         {question:"你付出的代价是什么？",options:[
           {label:"自责",effect:"你受到 2 点伤害，本次伤害 +3"},
           {label:"麻木",effect:"你本轮拼点骰 -1，但本次伤害 +2"},
-          {label:"承受",effect:"你本轮防御拼点骰 -2，但目标的攻击拼点骰 -2"}
+          {label:"承受",effect:"你本轮防御拼点骰 -2，但目标本轮所有意图值 -2"}
         ]}
       ],
       large:[
         {question:"你的痛苦如何伤害他人？",options:[
-          {label:"腐蚀",effect:"目标本轮拼点骰 -2"},
-          {label:"沉重",effect:"命中后目标本轮当前速度 -3"},
-          {label:"侵蚀",effect:"命中后目标本轮不能恢复 HP、不能获得临时生命，且本轮拼点骰 -1"}
+          {label:"腐蚀",effect:"本次意图值 -2"},
+          {label:"沉重",effect:"命中后目标本轮不能接线，且其所有意图值 -1"},
+          {label:"侵蚀",effect:"命中后目标本轮不能恢复 HP、不能获得临时生命，且其所有意图值 -1"}
         ]},
         {question:"你付出的代价是什么？",options:[
           {label:"自责",effect:"你受到 3 点伤害，本次伤害 +4"},
           {label:"麻木",effect:"你本轮拼点骰 -1，但本次伤害 +3"},
-          {label:"承受",effect:"你本轮防御拼点骰 -2，但目标的攻击拼点骰 -3"}
+          {label:"承受",effect:"你本轮防御拼点骰 -2，但目标本轮所有意图值 -3"}
         ]},
         {question:"苦难的尽头是？",options:[
           {label:"共鸣",effect:"若你当前 HP 低于 50%，本次伤害 +4"},
-          {label:"绝望蔓延",effect:"与目标相邻的敌人本轮拼点骰各 -2，且本轮受到的伤害各 +2"},
-          {label:"【切换】忧郁气场",effect:"切换到此攻击模式时，所有敌人本轮拼点骰 -1"}
+          {label:"绝望蔓延",effect:"与目标相邻的敌人本轮意图值各 -2，且本轮受到的伤害各 +2"},
+          {label:"【切换】忧郁气场",effect:"切换到此攻击模式时，所有敌人本轮意图值 -1"}
         ]}
       ]
     },
     debuff:{
       small:[
         {question:"你要夺走什么？",options:[
-          {label:"力量",effect:"目标本轮攻击拼点骰额外 -1"},
-          {label:"意志",effect:"目标本轮防御拼点骰额外 -1"},
-          {label:"敏锐",effect:"目标本轮当前速度 -2"}
+          {label:"力量",effect:"目标本轮造成的伤害 -3"},
+          {label:"意志",effect:"目标本轮所有意图值额外 -1"},
+          {label:"敏锐",effect:"目标本轮受到的伤害 +2"}
         ]},
         {question:"痛苦如何扩散？",options:[
-          {label:"蔓延",effect:"与目标相邻的一名敌人本轮拼点骰 -1"},
+          {label:"蔓延",effect:"与目标相邻的一名敌人本轮意图值 -1"},
           {label:"加深",effect:"目标本轮受到的伤害 +2"},
-          {label:"自苦",effect:"你受到 2 点伤害，目标本轮拼点骰额外 -2"}
+          {label:"自苦",effect:"你受到 2 点伤害，目标本轮意图值额外 -2"}
         ]}
       ],
       large:[
         {question:"你要夺走什么？",options:[
-          {label:"力量",effect:"目标本轮攻击拼点骰额外 -2"},
-          {label:"意志",effect:"目标本轮防御拼点骰额外 -2"},
-          {label:"敏锐",effect:"目标本轮当前速度 -3"}
+          {label:"力量",effect:"目标本轮造成的伤害 -5"},
+          {label:"意志",effect:"目标本轮所有意图值额外 -2"},
+          {label:"敏锐",effect:"目标本轮受到的伤害 +3"}
         ]},
         {question:"痛苦如何扩散？",options:[
-          {label:"蔓延",effect:"与目标相邻的所有敌人本轮拼点骰各 -1"},
+          {label:"蔓延",effect:"与目标相邻的所有敌人本轮意图值各 -1"},
           {label:"加深",effect:"目标本轮受到的伤害 +3"},
-          {label:"自苦",effect:"你受到 3 点伤害，目标本轮拼点骰额外 -3"}
+          {label:"自苦",effect:"你受到 3 点伤害，目标本轮意图值额外 -3"}
         ]},
         {question:"剥夺的尽头是？",options:[
-          {label:"虚弱领域",effect:"所有敌人本轮当前速度 -1"},
+          {label:"虚弱领域",effect:"所有敌人本轮意图值 -1"},
           {label:"以痛止痛",effect:"你受到 2 点伤害，一名友方本轮拼点骰 +2"},
-          {label:"【切换】绝望之影",effect:"切换到此攻击模式时，所有敌人本轮当前速度 -2"}
+          {label:"【切换】绝望之影",effect:"切换到此攻击模式时，所有敌人本轮受到的伤害 +2"}
         ]}
       ]
     }
@@ -476,7 +512,7 @@ const SIN_TRAIT_QA = {
           {label:"优越",effect:"若你的当前 HP 高于目标，伤害 +2"}
         ]},
         {question:"你的方式是什么？",options:[
-          {label:"完美计算",effect:"你可以在看到对方拼点骰结果后，再决定是否使用此卡（若不用则不消耗）"},
+          {label:"完美计算",effect:"你可以在看到本次意图值后，再决定是否使用此卡（若不用则不消耗）"},
           {label:"全面压制",effect:"命中后目标本轮不能打出防御卡"},
           {label:"临机应变",effect:"若拼点失败，你立即打出一张防御卡作为反应（额外消耗该卡）"}
         ]}
@@ -488,7 +524,7 @@ const SIN_TRAIT_QA = {
           {label:"优越",effect:"若你的当前 HP 高于目标，伤害 +3"}
         ]},
         {question:"你的方式是什么？",options:[
-          {label:"完美计算",effect:"你可以在看到对方拼点骰结果后，再决定是否使用此卡（若不用则不消耗）"},
+          {label:"完美计算",effect:"你可以在看到本次意图值后，再决定是否使用此卡（若不用则不消耗）"},
           {label:"全面压制",effect:"命中后目标本轮不能打出防御卡"},
           {label:"临机应变",effect:"若拼点失败，你仅受到基础伤害，且对目标造成 2 点伤害"}
         ]},
@@ -507,7 +543,7 @@ const SIN_TRAIT_QA = {
           {label:"偏转",effect:"防御失败时你恢复 3 HP"}
         ]},
         {question:"你的防线有什么特色？",options:[
-          {label:"无懈可击",effect:"攻击者本轮拼点骰 -1"},
+          {label:"无懈可击",effect:"本次意图值 -1"},
           {label:"指挥若定",effect:"防御胜利时，一名友方本轮拼点骰 +1"},
           {label:"游刃有余",effect:"防御成功后，你可以免费切换攻击模式"}
         ]}
@@ -519,12 +555,12 @@ const SIN_TRAIT_QA = {
           {label:"偏转",effect:"防御失败时你恢复 5 HP"}
         ]},
         {question:"你的防线有什么特色？",options:[
-          {label:"无懈可击",effect:"攻击者本轮拼点骰 -2"},
+          {label:"无懈可击",effect:"本次意图值 -2"},
           {label:"指挥若定",effect:"防御胜利时，所有友方本轮拼点骰 +1"},
           {label:"游刃有余",effect:"防御成功后，你可以免费切换攻击模式并恢复 2 HP"}
         ]},
         {question:"完美的壁垒能撑多久？",options:[
-          {label:"完美防御",effect:"若你的拼点值高出攻击方 4 或以上，攻击者受到 3 点伤害"},
+          {label:"完美防御",effect:"若你的拼点值高出意图值 4 或以上，攻击者受到 3 点伤害"},
           {label:"全盘掌控",effect:"防御成功时你获得 3 点临时生命"},
           {label:"【切换】绝对防御",effect:"切换到此攻击模式时，你获得 4 点临时生命"}
         ]}
@@ -534,8 +570,8 @@ const SIN_TRAIT_QA = {
       small:[
         {question:"你如何展开双重打击？",options:[
           {label:"连击",effect:"两次攻击的目标可以不同"},
-          {label:"集中",effect:"两次攻击对同一目标时，第二次拼点骰 +1"},
-          {label:"变招",effect:"第二次攻击改用你另一组攻击模式的拼点属性（两组模式相同时改为第二次拼点骰 +1）"}
+          {label:"集中",effect:"两次攻击对同一目标时，第二次攻击的伤害 +2"},
+          {label:"变招",effect:"第二次攻击改用你另一组攻击模式的拼点属性（两组模式相同时改为第二次攻击的伤害 +2）"}
         ]},
         {question:"多重攻击的节奏是？",options:[
           {label:"迅捷",effect:"两次攻击在本回合内连续结算"},
@@ -546,8 +582,8 @@ const SIN_TRAIT_QA = {
       large:[
         {question:"你如何展开双重打击？",options:[
           {label:"连击",effect:"两次攻击的目标可以不同"},
-          {label:"集中",effect:"两次攻击对同一目标时，第二次拼点骰 +2"},
-          {label:"变招",effect:"第二次攻击改用你另一组攻击模式的拼点属性（两组模式相同时改为第二次拼点骰 +2）"}
+          {label:"集中",effect:"两次攻击对同一目标时，第二次攻击的伤害 +3"},
+          {label:"变招",effect:"第二次攻击改用你另一组攻击模式的拼点属性（两组模式相同时改为第二次攻击的伤害 +3）"}
         ]},
         {question:"多重攻击的节奏是？",options:[
           {label:"迅捷",effect:"两次攻击在本回合内连续结算"},
@@ -557,7 +593,7 @@ const SIN_TRAIT_QA = {
         {question:"双重打击的极致是？",options:[
           {label:"无间断",effect:"若两次攻击均命中，目标本轮不能行动"},
           {label:"精益求精",effect:"你加入的那张额外攻击卡也获得本卡的一条特效"},
-          {label:"【切换】绝对支配",effect:"切换到此攻击模式时，你本轮拼点骰 +2"}
+          {label:"【切换】绝对支配",effect:"切换到此攻击模式时，本回合两次攻击的伤害各 +2"}
         ]}
       ]
     }
@@ -567,11 +603,11 @@ const SIN_TRAIT_QA = {
       small:[
         {question:"你羡慕什么？",options:[
           {label:"力量",effect:"若目标本次用于拼点的属性值高于你，本次伤害 +3"},
-          {label:"运气",effect:"命中后你本轮当前速度 +2"},
+          {label:"运气",effect:"本次攻击的拼点骰 +2"},
           {label:"拥有",effect:"若目标的当前 HP 高于你，本次伤害 +3"}
         ]},
         {question:"你会怎么做？",options:[
-          {label:"夺过来",effect:"目标本轮拼点骰 -1"},
+          {label:"夺过来",effect:"本次意图值 -1"},
           {label:"模仿",effect:"本次攻击改用你另一组攻击模式的拼点属性（两组模式相同时改为拼点骰 +1）"},
           {label:"毁掉",effect:"命中后你对同一目标立即造成 2 点额外伤害"}
         ]}
@@ -579,18 +615,18 @@ const SIN_TRAIT_QA = {
       large:[
         {question:"你羡慕什么？",options:[
           {label:"力量",effect:"若目标本次用于拼点的属性值高于你，本次伤害 +4"},
-          {label:"运气",effect:"命中后你本轮当前速度 +3"},
+          {label:"运气",effect:"本次攻击的拼点骰 +3"},
           {label:"拥有",effect:"若目标的当前 HP 高于你，本次伤害 +4"}
         ]},
         {question:"你会怎么做？",options:[
-          {label:"夺过来",effect:"目标本轮拼点骰 -2"},
+          {label:"夺过来",effect:"本次意图值 -2"},
           {label:"模仿",effect:"本次攻击改用你另一组攻击模式的拼点属性，且你的拼点骰 +1（两组模式相同时改为拼点骰 +2）"},
           {label:"毁掉",effect:"命中后你对同一目标立即造成 3 点额外伤害"}
         ]},
         {question:"不甘的尽头是？",options:[
           {label:"同归于尽",effect:"你和目标各受到 3 点伤害"},
           {label:"后来居上",effect:"若本次伤害使目标 HP 降至低于你，你恢复 3 HP"},
-          {label:"【切换】不甘之眼",effect:"切换到此攻击模式时，你选择一名敌人，其本轮拼点骰 -1"}
+          {label:"【切换】不甘之眼",effect:"切换到此攻击模式时，你选择一名敌人，其本轮意图值 -1"}
         ]}
       ]
     },
@@ -598,7 +634,7 @@ const SIN_TRAIT_QA = {
       small:[
         {question:"你如何模仿他人的防御？",options:[
           {label:"借鉴",effect:"你的防御拼点骰 +1"},
-          {label:"反射",effect:"若攻击者本轮使用了防御卡，你的防御拼点骰 +2"},
+          {label:"反射",effect:"本次意图值 -3"},
           {label:"超越",effect:"防御失败时你恢复 3 HP"}
         ]},
         {question:"防御后你得到了什么？",options:[
@@ -610,7 +646,7 @@ const SIN_TRAIT_QA = {
       large:[
         {question:"你如何模仿他人的防御？",options:[
           {label:"借鉴",effect:"你的防御拼点骰 +2"},
-          {label:"反射",effect:"若攻击者本轮使用了防御卡，你的防御拼点骰 +3"},
+          {label:"反射",effect:"本次意图值 -4"},
           {label:"超越",effect:"防御失败时你恢复 5 HP"}
         ]},
         {question:"防御后你得到了什么？",options:[
@@ -629,29 +665,29 @@ const SIN_TRAIT_QA = {
       small:[
         {question:"你想影响什么？",options:[
           {label:"局势",effect:"一名友方本轮拼点骰 +2"},
-          {label:"对比",effect:"一名敌人本轮拼点骰 -2"},
-          {label:"侵蚀",effect:"一名敌人本轮当前速度 -2"}
+          {label:"对比",effect:"一名敌人本轮意图值 -2"},
+          {label:"侵蚀",effect:"一名敌人本轮受到的伤害 +2"}
         ]},
         {question:"你的手段是什么？",options:[
-          {label:"竞争",effect:"一名友方本轮拼点骰 +1，一名敌人本轮拼点骰 -1"},
-          {label:"窃取",effect:"一名敌人本轮拼点骰 -1，一名友方恢复 2 HP"},
+          {label:"竞争",effect:"一名友方本轮拼点骰 +1，一名敌人本轮意图值 -1"},
+          {label:"窃取",effect:"一名敌人本轮意图值 -1，一名友方恢复 2 HP"},
           {label:"标记",effect:"你对一名敌人立即造成 1 点伤害"}
         ]}
       ],
       large:[
         {question:"你想影响什么？",options:[
           {label:"局势",effect:"一名友方本轮拼点骰 +3"},
-          {label:"对比",effect:"一名敌人本轮拼点骰 -3"},
-          {label:"侵蚀",effect:"一名敌人本轮当前速度 -3"}
+          {label:"对比",effect:"一名敌人本轮意图值 -3"},
+          {label:"侵蚀",effect:"一名敌人本轮受到的伤害 +3"}
         ]},
         {question:"你的手段是什么？",options:[
-          {label:"竞争",effect:"一名友方本轮拼点骰 +2，一名敌人本轮拼点骰 -2"},
-          {label:"窃取",effect:"一名敌人本轮拼点骰 -2，一名友方恢复 3 HP"},
+          {label:"竞争",effect:"一名友方本轮拼点骰 +2，一名敌人本轮意图值 -2"},
+          {label:"窃取",effect:"一名敌人本轮意图值 -2，一名友方恢复 3 HP"},
           {label:"标记",effect:"你对一名敌人立即造成 2 点伤害"}
         ]},
         {question:"嫉妒的尽头是？",options:[
-          {label:"公之于众",effect:"一名敌人本轮拼点骰 -2"},
-          {label:"【切换】不甘之眼",effect:"切换到此攻击模式时，一名敌人本轮拼点骰 -1，一名友方本轮拼点骰 +1"},
+          {label:"公之于众",effect:"一名敌人本轮意图值 -2"},
+          {label:"【切换】不甘之眼",effect:"切换到此攻击模式时，一名敌人本轮意图值 -1，一名友方本轮拼点骰 +1"},
           {label:"逆转",effect:"若场上任何敌人 HP 高于所有友方，你恢复 3 HP"}
         ]}
       ]
@@ -667,16 +703,16 @@ const EGO_TYPES = {
 };
 
 const EGO_TYPE_BASE = {
-  assault:    "拼点胜利 → 造成 8 + 差值 的伤害；你的拼点骰 +1",
+  assault:    "基础伤害 8 + 差值；你的拼点骰 +1",
   blessing:   "你与一名友方各恢复 4 HP，各获得 3 点临时生命",
-  corruption: "本轮你的拼点骰 +2；所有敌人本轮拼点骰 -1"
+  corruption: "本轮你的拼点骰 +2；所有敌人本轮意图值 -1"
 };
 
 /* 核心罪孽专属特效（免费附带，不占问答名额）。忧郁在庇佑型下文案被替换（庇佑型不产生伤害数字） */
 const EGO_SIN_EFFECT = {
   wrath:   {label:"燃尽",effect:"所有敌人本轮受到的伤害 +1"},
   lust:    {label:"执心",effect:"本轮你每次恢复 HP 时，额外恢复 1 点"},
-  sloth:   {label:"静止",effect:"所有敌人本轮当前速度 -1"},
+  sloth:   {label:"静止",effect:"所有敌人本轮意图值 -1"},
   gluttony:{label:"吞食",effect:"本轮你造成伤害后，恢复其中 1/3（向下取整）"},
   gloom:   {label:"共苦",effect:"你受到 2 点伤害，本次 E.G.O 所有数值效果 +2",
             effectBlessing:"你本轮拼点骰 -2，本次 E.G.O 所有数值效果 +2"},
@@ -697,7 +733,7 @@ const EGO_TYPE_QA = {
   assault:[
     {question:"你的罪孽如何显形？",options:[
       {label:"撕裂",effect:"你的拼点骰额外 +2"},
-      {label:"贯穿",effect:"目标本轮防御拼点骰 -3"},
+      {label:"贯穿",effect:"本次意图值 -3"},
       {label:"崩落",effect:"本次伤害 +3"}
     ]},
     {question:"代价由谁承担？",options:[
@@ -719,13 +755,13 @@ const EGO_TYPE_QA = {
   blessing:[
     {question:"它以什么形式庇护？",options:[
       {label:"覆盖",effect:"所有友方额外获得 3 点临时生命"},
-      {label:"净化",effect:"所有友方本轮免疫拼点骰降低与当前速度降低效果"},
+      {label:"净化",effect:"所有友方本轮免疫拼点骰降低效果"},
       {label:"唤起",effect:"所有友方本轮拼点骰额外 +1"}
     ]},
     {question:"庇护的代价是？",options:[
       {label:"燃身",effect:"你本轮拼点骰 -3，本卡所有恢复与临时生命数值 +3"},
       {label:"独醒",effect:"本轮你不能打出攻击卡，所有友方本轮受到的伤害 -2"},
-      {label:"牵引",effect:"你本轮拼点骰 -2，所有友方本轮当前速度 +2"}
+      {label:"牵引",effect:"你本轮拼点骰 -2，所有友方本轮受到的伤害 -3"}
     ]},
     {question:"庇佑的尽头是？",options:[
       {label:"不灭",effect:"本轮内友方的 HP 不会降至 1 以下"},
@@ -741,11 +777,11 @@ const EGO_TYPE_QA = {
   corruption:[
     {question:"侵蚀从哪里开始？",options:[
       {label:"肢体",effect:"本轮你的攻击拼点骰额外 +2"},
-      {label:"感官",effect:"本轮你的当前速度 +3、防御拼点骰 +2"},
-      {label:"气场",effect:"所有敌人本轮当前速度额外 -2"}
+      {label:"感官",effect:"本轮你的防御拼点骰 +3，且你受到的伤害 -2"},
+      {label:"气场",effect:"所有敌人本轮造成的伤害 -3"}
     ]},
     {question:"它向外散播什么？",options:[
-      {label:"恐惧",effect:"所有敌人本轮防御拼点骰 -2"},
+      {label:"恐惧",effect:"所有敌人本轮意图值 -2"},
       {label:"衰弱",effect:"所有敌人本轮受到的伤害 +2"},
       {label:"停滞",effect:"所有敌人本轮不能恢复 HP、不能获得临时生命"}
     ]},
@@ -785,9 +821,9 @@ function getEgoClashInfo(){
     return k ? `${g}组 ${ATTACK_MODES[k].attr}(${ATTACK_MODES[k].label})` : `${g}组 未选择模式`;
   }).join("，");
   return {
-    formula:`拼点值 = 1D6 + 发动时所处卡组的拼点属性 + 拼点修正（${per}）`,
-    dmg:`伤害 = 基础伤害 + (我方拼点值 - 对方拼点值)`,
-    noDefDmg:`无防御卡：攻击自动命中，防御方拼点值 = 体魄；伤害 = 基础伤害 + (我方拼点值 - 防御方拼点值)，差值最低为0`
+    formula:`拼点值 = 1D6 + 发动时所处卡组的拼点属性 + 拼点修正，拼点值 ≥ 意图值 即命中（${per}）`,
+    dmg:`伤害 = 基础伤害 + (拼点值 - 意图值)`,
+    noDefDmg:`未接线：攻击自动命中，伤害 = 基础伤害 + (意图值 - 体魄)，最低为 0`
   };
 }
 
@@ -814,6 +850,7 @@ function buildEgoExport(){
     shardCost: egoShardCost(),
     corrosionDC: egoCorrosionDC(),
     baseEffect: type?EGO_TYPE_BASE[type]:null,
+    clash: (type && EGO_TYPES[type].clash) ? getEgoClashInfo() : null,
     sinEffect: getEgoSinEffect(),
     qa: qaResolved,
     description: state.ego.description
@@ -859,33 +896,12 @@ const spentPoints = () => sumAttrs() - ATTR_DEFS.length; // 已用的额外点�
 const maxHP = () => 12 + state.attrs.体魄*4;
 const panic1 = () => Math.floor(maxHP()*0.5);
 const panic2 = () => Math.floor(maxHP()*0.25);
-const speedInfo = () => SPEED_TABLE[state.attrs.灵巧];   // 斩击模式的速度骰
-
-/* 某攻击模式下的速度与接线方式。速度绑定攻击模式而非单一属性，
-   所以同一角色切换卡组时接线方式也会跟着换。 */
-function modeSpeedInfo(modeKey){
-  const m = ATTACK_MODES[modeKey];
-  if(!m) return null;
-  const v = state.attrs[m.attr];
-  if(m.speed==="roll"){
-    const sp = SPEED_TABLE[v];
-    return {kind:"roll", speedText:`${sp.range}（${sp.dice}）`,
-      rule:`投骰决定速度，速度 ≥ 敌方速度时可接线`};
-  }
-  if(m.speed==="fixed"){
-    return {kind:"fixed", speedText:`${v}（固定，不投骰）`,
-      rule:`速度恒等于${m.attr}(${v})，≥ 敌方速度时可接线`};
-  }
-  const pen = STRIKE_CLASH_PENALTY[v];
-  return {kind:"ignore", speedText:"无视速度", penalty:pen,
-    rule:`无条件接线，防御拼点 ${pen}（由力量${v}决定）`};
-}
-/* 卡组标题用的模式说明：拼点属性 + 接线方式，一处生成供各页面复用 */
+/* 卡组标题用的模式说明：拼点属性 + 模式副效果，一处生成供各页面复用 */
 function groupModeDesc(gid){
   const modeKey = state.attackModes[gid==="a"?0:1];
   if(!modeKey) return "未选择攻击模式";
-  const m = ATTACK_MODES[modeKey], si = modeSpeedInfo(modeKey);
-  return `${m.label}模式 · 拼点属性 ${m.attr} · 速度 ${si.speedText} · ${si.rule}`;
+  const m = ATTACK_MODES[modeKey];
+  return `${m.label}模式 · 拼点属性 ${m.attr}(${state.attrs[m.attr]}) · ${m.bonus}`;
 }
 
 /* 固定值（所有初始角色统一） */
@@ -1049,20 +1065,18 @@ function getClashInfo(trait, gid){
   const modeAttr=modeKey?ATTACK_MODES[modeKey].attr:"—";
   const modeLabel=modeKey?ATTACK_MODES[modeKey].label:"—";
   if(trait==="attack"){
-    return {clash:true, formula:`拼点值 = 1D6 + ${modeAttr}(${modeLabel}) + 拼点修正`,
-      dmg:`伤害 = 基础伤害 + (我方拼点值 - 对方拼点值)`,
-      noDefDmg:`无防御卡：攻击自动命中，防御方拼点值 = 体魄（不投骰）；伤害 = 基础伤害 + (我方拼点值 - 防御方拼点值)，差值最低为0`};
+    return {clash:true, formula:`拼点值 = 1D6 + ${modeAttr}(${modeLabel}) + 拼点修正，拼点值 ≥ 意图值 即命中`,
+      dmg:`伤害 = 基础伤害 + (拼点值 - 意图值)`,
+      noDefDmg:`未接线：攻击自动命中，伤害 = 基础伤害 + (意图值 - 体魄)，最低为 0`};
   }
   if(trait==="multiAttack"){
-    return {clash:true, formula:`拼点值 = 1D6 + ${modeAttr}(${modeLabel}) + 拼点修正（两次分别结算）`,
-      dmg:`伤害 = 基础伤害 + (我方拼点值 - 对方拼点值)`,
-      noDefDmg:`无防御卡：攻击自动命中，防御方拼点值 = 体魄（不投骰）；伤害 = 基础伤害 + (我方拼点值 - 防御方拼点值)，差值最低为0`};
+    return {clash:true, formula:`拼点值 = 1D6 + ${modeAttr}(${modeLabel}) + 拼点修正，拼点值 ≥ 意图值 即命中（两次分别结算）`,
+      dmg:`伤害 = 基础伤害 + (拼点值 - 意图值)`,
+      noDefDmg:`未接线：攻击自动命中，伤害 = 基础伤害 + (意图值 - 体魄)，最低为 0`};
   }
-  // 防御/援护/反击统一用体魄；打击模式的接线减值在此体现
+  // 防御/援护/反击统一用体魄
   if(trait==="defense"||trait==="shield"||trait==="counter"){
-    const si=modeSpeedInfo(modeKey);
-    const pen=(si&&si.kind==="ignore")?` ${si.penalty}（${modeLabel}无视速度接线的代价）`:"";
-    return {clash:true, formula:`拼点值 = 1D6 + 体魄 + 拼点修正${pen}`,
+    return {clash:true, formula:`拼点值 = 1D6 + 体魄 + 拼点修正，拼点值 ≥ 意图值 即成功`,
       dmg:null, noDefDmg:null};
   }
   return {clash:false, formula:null, dmg:null, noDefDmg:null};
@@ -1079,9 +1093,9 @@ function buildCardGroupExport(gid){
     const effects=[];
     if(entry.trait){
       if(level==="basic"){
-        effects.push(CARD_BASE_EFFECT[entry.trait]||"");
+        effects.push(cardBaseEffect(entry.trait,k));
       } else {
-        effects.push(CARD_SKILL_BASE[entry.trait]?.[level]||"");
+        effects.push(cardSkillBase(entry.trait,k,level));
         const qa=getSinQA(k,entry.trait,level);
         (entry.answers||[]).forEach((a,i)=>{
           if(a!=null && qa[i]?.options?.[a]) effects.push(`${qa[i].options[a].label}——${qa[i].options[a].effect}`);
@@ -1090,7 +1104,8 @@ function buildCardGroupExport(gid){
     }
     result[k]={
       level, trait:entry.trait||null, effects,
-      clash: entry.trait? getClashInfo(entry.trait, gid) : null
+      clash: entry.trait? getClashInfo(entry.trait, gid) : null,
+      extraCard: entry.trait==="multiAttack" ? extraAttackCard(k, gid) : null
     };
   }
   return result;
@@ -1344,10 +1359,10 @@ function renderWarns(v){
 
 /* -------- 步骤 2：衍生数值 -------- */
 function renderStep2(){
-  // 速度绑定攻击模式，所以这里列出三种模式各自的接线方式供玩家在第 5 步前参考
+  // 列出三种攻击模式的拼点属性与副效果，供玩家在第 5 步选择前参考
   const modeRows=Object.keys(ATTACK_MODES).map(k=>{
-    const m=ATTACK_MODES[k], si=modeSpeedInfo(k);
-    return `<tr><td>${m.label}（${m.attr} ${state.attrs[m.attr]}）</td><td>${si.speedText}</td><td>${si.rule}</td></tr>`;
+    const m=ATTACK_MODES[k];
+    return `<tr><td>${m.label}</td><td>${m.attr}(${state.attrs[m.attr]})</td><td>${m.bonus}</td></tr>`;
   }).join("");
   stageCard.innerHTML=`
     <h2>第一部分 · 衍生数值</h2>
@@ -1356,7 +1371,7 @@ function renderStep2(){
       <div class="stat">
         <div class="k">最大生命值</div>
         <div class="v">${maxHP()}</div>
-        <div class="note">= 12 ＋ 体魄(${state.attrs.体魄}) × 4</div>
+        <div class="note">= 12 + 体魄(${state.attrs.体魄}) × 4</div>
       </div>
       <div class="stat">
         <div class="k">混乱线</div>
@@ -1370,27 +1385,27 @@ function renderStep2(){
       </div>
       <div class="stat">
         <div class="k">防御拼点</div>
-        <div class="v">1D6 ＋ ${state.attrs.体魄}</div>
-        <div class="note">防御与援护统一使用体魄(${state.attrs.体魄})；接不到线时防御方拼点值 ＝ 体魄，不投骰</div>
+        <div class="v">1D6 + ${state.attrs.体魄}</div>
+        <div class="note">防御 / 援护 / 反击统一使用体魄(${state.attrs.体魄})，拼点值 ≥ 意图值 即成功</div>
       </div>
       <div class="stat">
         <div class="k">罪孽压力上限</div>
         <div class="v">${sinPressureCap()}</div>
-        <div class="note">＝ 意志(${state.attrs.意志}) ＋ 2；初始压力恒为 0，战斗中累积</div>
+        <div class="note">= 意志(${state.attrs.意志}) + 2；初始压力恒为 0，战斗中累积</div>
       </div>
       <div class="stat">
         <div class="k">E.G.O 特效数量</div>
         <div class="v">${egoEffectCount()}</div>
-        <div class="note">＝ 共感(${state.attrs.共感})，每点共感一条特效（上限 ${EGO_MAX_EFFECTS}）</div>
+        <div class="note">= 共感(${state.attrs.共感})，每点共感一条特效（上限 ${EGO_MAX_EFFECTS}）</div>
       </div>
       <div class="stat" style="grid-column:1/-1">
-        <div class="k">速度 / 接线</div>
-        <div class="note" style="margin:6px 0 0">接线（拦下敌人的攻击）由你所处的<b>攻击模式</b>决定，而不是某一条属性。三种模式各有一条进入拼点的路径：</div>
+        <div class="k">攻击模式</div>
+        <div class="note" style="margin:6px 0 0">每组卡片绑定一种攻击模式，决定攻击拼点用哪条属性，并附带一条持续副效果：</div>
         <table class="sh auto" style="margin-top:10px">
-          <tr><td style="color:var(--muted)">模式</td><td style="color:var(--muted)">速度</td><td style="color:var(--muted)">接线方式</td></tr>
+          <tr><td style="color:var(--muted)">模式</td><td style="color:var(--muted)">拼点属性</td><td style="color:var(--muted)">副效果</td></tr>
           ${modeRows}
         </table>
-        <div class="note" style="margin-top:8px">在第 5 步为两组卡片各选一种模式；切换卡组时接线方式随之改变。</div>
+        <div class="note" style="margin-top:8px">在第 5 步为两组卡片各选一种模式。</div>
       </div>
     </div>
     <div class="attr-help" style="margin-top:18px">
@@ -1398,13 +1413,18 @@ function renderStep2(){
       <br>· 当前 HP ≤ 第一混乱线 → 所有拼点骰 -1
       <br>· 当前 HP ≤ 第二混乱线 → 所有拼点骰 -2（不与上一条叠加）
       <br>· HP 被治疗回到线上时，惩罚立即解除
-      <br>· 恐慌判定：首次跌破第二混乱线时，进行 1D6＋意志 ≥ 7 的判定，失败则本回合由 GM 接管；每场战斗只判定一次
-      <br><b>意志的作用：</b> 碎片承载上限、罪孽压力上限（均为 意志＋2）、恐慌判定、E.G.O 侵蚀判定、创伤稳定性。
+      <br>· 恐慌判定：首次跌破第二混乱线时，进行 1D6 + 意志 ≥ 7 的判定，失败则本回合由 GM 接管；每场战斗只判定一次
+      <br><b>意志的作用：</b> 碎片承载上限、罪孽压力上限（均为 意志 + 2）、恐慌判定、E.G.O 侵蚀判定、创伤稳定性。
       <br><b>共感的作用：</b> E.G.O 特效数量（每点一条）、援护与支援类判定。
       <br>本游戏只有一种伤害，所有伤害都先扣临时生命、再扣 HP，不存在无视临时生命的伤害类型，也不存在任何减伤检定。
-      <br><b>接线：</b> 敌我同时投掷速度，敌方先公布速度并选定目标，我方再决定是否接线。
-      <br>· 接不到线时不能打出防御卡与援护卡，但仍可打出增益/减益卡，或单方面攻击敌人
-      <br>· <b>进攻不受速度限制</b>——高速敌人只是无法被接线，你依然可以攻击到他
+      <br><b>拼点与意图值：</b> 敌方公布攻击意图时会同时给出一个<b>意图值</b>，敌方不投骰。
+      <br>· 只有我方投拼点骰：<b>拼点值 = 1D6 + 属性 + 拼点修正</b>
+      <br>· 拼点值 <b>≥ 意图值</b> 即成功；超出的部分称为<b>差值</b>（差值 = 拼点值 - 意图值，最低为 0）
+      <br>· 卡面写「基础伤害 N + 差值」时，实际伤害 = N + 差值
+      <br>· 卡面上「意图值 -N」表示压低这次判定的门槛，与「拼点骰 +N」等价但作用对象不同
+      <br><b>接线：</b> 敌方宣布攻击并选定目标后，你可以打出防御 / 援护 / 反击卡接线。
+      <br>· <b>每轮限接一次</b>，接线不占用行动槽，你仍可在本轮正常打出自己的卡
+      <br>· 未接线的攻击自动命中：伤害 = 基础伤害 + (意图值 - 体魄)，最低为 0
     </div>
   `;
 }
@@ -1598,7 +1618,7 @@ function renderSinProfilePreview(body){
       <table class="sh">
         <tr><td>核心罪孽</td><td>${p.coreSin?SIN_LABELS[p.coreSin]:'<span style="color:var(--danger)">未确定</span>'}</td></tr>
         <tr><td>排斥罪孽</td><td>${rej.length?rej.map(k=>SIN_LABELS[k]).join("、"):'<span style="color:var(--danger)">未确定</span>'}</td></tr>
-        <tr><td>初始罪孽压力</td><td>${p.sinPressure} / ${sinPressureCap()}<span style="color:var(--muted)"> · 上限 ＝ 意志(${state.attrs.意志}) ＋ 2</span></td></tr>
+        <tr><td>初始罪孽压力</td><td>${p.sinPressure} / ${sinPressureCap()}<span style="color:var(--muted)"> · 上限 = 意志(${state.attrs.意志}) + 2</span></td></tr>
       </table>
     </div>
     <div class="export-row">
@@ -1658,7 +1678,7 @@ function renderEgoStep(){
     baseHtml = `<div class="sheet"><div class="sin-card preview-card">
       <h4>基础功能（ZAYIN 档）</h4>
       <p class="sin-summary">${EGO_TYPE_BASE[ego.type]}</p>
-      ${clashInfo?`<div class="card-clash"><span class="pill core">拼点</span> ${clashInfo.formula}<br><span class="card-dmg">${clashInfo.dmg}</span><br><span class="card-dmg">${clashInfo.noDefDmg}</span></div>`:`<div class="card-clash"><span class="pill rej">不拼点</span> 打出即生效</div>`}
+      ${clashInfo?`<div class="card-clash"><span class="pill core">拼点</span> ${clashInfo.formula}<br><span class="card-dmg">${clashInfo.dmg}</span></div>`:`<div class="card-clash"><span class="pill rej">不拼点</span> 打出即生效</div>`}
       ${sinEffect?`<p class="sin-summary" style="margin-top:10px"><b>罪孽专属特效 · ${sinEffect.label}</b>——${sinEffect.effect}</p>`:''}
     </div></div>`;
   }
@@ -1690,7 +1710,7 @@ function renderEgoStep(){
       <div class="stat">
         <div class="k">罪孽属性</div>
         <div class="v" style="font-size:18px"><span class="sin-icon-inline">${sinIcon(sin)}</span>${SIN_LABELS[sin]}</div>
-        <div class="note">＝ 核心罪孽，自动派生</div>
+        <div class="note">= 核心罪孽，自动派生</div>
       </div>
       <div class="stat">
         <div class="k">等级</div>
@@ -1700,22 +1720,22 @@ function renderEgoStep(){
       <div class="stat">
         <div class="k">特效数量</div>
         <div class="v">${ec}</div>
-        <div class="note">＝ 共感(${state.attrs.共感})，每点共感一条特效${state.attrs.共感>EGO_MAX_EFFECTS?`（题库上限 ${EGO_MAX_EFFECTS}）`:""}</div>
+        <div class="note">= 共感(${state.attrs.共感})，每点共感一条特效${state.attrs.共感>EGO_MAX_EFFECTS?`（题库上限 ${EGO_MAX_EFFECTS}）`:""}</div>
       </div>
       <div class="stat">
         <div class="k">碎片消耗 / 侵蚀阈值</div>
         <div class="v">${egoShardCost()} / ${dc}</div>
-        <div class="note">侵蚀阈值 ＝ 4 ＋ 特效数量(${ec})</div>
+        <div class="note">侵蚀阈值 = 4 + 特效数量(${ec})</div>
       </div>
       <div class="stat">
         <div class="k">碎片承载上限</div>
         <div class="v">${cap}</div>
-        <div class="note">＝ 意志(${state.attrs.意志}) ＋ 2</div>
+        <div class="note">= 意志(${state.attrs.意志}) + 2</div>
       </div>
       <div class="stat">
         <div class="k">罪孽压力上限</div>
         <div class="v">${sinPressureCap()}</div>
-        <div class="note">＝ 意志(${state.attrs.意志}) ＋ 2；初始压力恒为 0</div>
+        <div class="note">= 意志(${state.attrs.意志}) + 2；初始压力恒为 0</div>
       </div>
     </div>
 
@@ -1776,21 +1796,21 @@ function renderAttackMode(){
     <h2>攻击模式选择</h2>
     <p class="lead">为两组卡片各选择一种攻击模式（可重复选择同一模式）。先切换到对应组，再点击下方卡片选择。</p>
     <div class="attr-help" style="margin-bottom:18px">
-      <b>攻击模式同时决定接线方式。</b> 你的速度绑定当前所处的模式，因此切换卡组时接线方式也会跟着换。
-      <br>· <b>斩击</b>投骰求速度——期望最高，但有波动，怕减速效果
-      <br>· <b>突刺</b>速度恒等于认知——不投骰，快敌必失、慢敌必中
-      <br>· <b>打击</b>无视速度无条件接线——代价是防御拼点减值，但免疫一切速度增减
+      <b>攻击模式决定攻击拼点用哪条属性，并附带一条在本组内持续生效的副效果。</b> 三条形状不同：
+      <br>· <b>斩击</b>（灵巧）本组所有拼点骰 +1 —— 提高命中率
+      <br>· <b>打击</b>（力量）拼点胜利时伤害额外 +2 —— 提高收益
+      <br>· <b>突刺</b>（认知）拼点失败时仍造成 3 点伤害 —— 提供保底
     </div>
     <div class="mode-tabs" id="modeTabs">
       <div class="mode-tab${tab===0?" active":""}" data-tab="0">
         <span class="mt-label">A 组</span>
         <span class="mt-val">${modeLabel(m[0])}</span>
-        ${m[0]?`<span class="mt-attr">拼点：${modeAttr(m[0])} · 速度 ${modeSpeedInfo(m[0]).speedText}</span>`:''}
+        ${m[0]?`<span class="mt-attr">拼点：${modeAttr(m[0])}</span>`:''}
       </div>
       <div class="mode-tab${tab===1?" active":""}" data-tab="1">
         <span class="mt-label">B 组</span>
         <span class="mt-val">${modeLabel(m[1])}</span>
-        ${m[1]?`<span class="mt-attr">拼点：${modeAttr(m[1])} · 速度 ${modeSpeedInfo(m[1]).speedText}</span>`:''}
+        ${m[1]?`<span class="mt-attr">拼点：${modeAttr(m[1])}</span>`:''}
       </div>
     </div>
     <div class="mode-grid" id="modeGrid"></div>
@@ -1806,13 +1826,11 @@ function renderAttackMode(){
     const selected=curVal===k;
     const card=document.createElement("div");
     card.className=`mode-card${selected?" sel":""}`;
-    const si=modeSpeedInfo(k);
     card.innerHTML=`
       <div class="mode-name">${md.label}</div>
       <div class="mode-attr">拼点属性：${md.attr}(${state.attrs[md.attr]})</div>
       <div class="mode-desc">${md.desc}</div>
-      <div class="mode-desc" style="margin-top:8px;color:var(--accent-2)">速度 ${si.speedText}</div>
-      <div class="mode-desc" style="font-size:12px;color:var(--muted)">${si.rule}</div>
+      <div class="mode-desc" style="margin-top:8px;color:var(--accent-2)">${md.bonus}</div>
       ${selected?'<span class="pill core">已选</span>':''}
     `;
     card.onclick=()=>{
@@ -1864,7 +1882,7 @@ function renderCardOverview(body){
   body.innerHTML=`
     <p class="lead">根据你的罪孽点数，以下罪孽会生成卡片。两组卡片构成相同，但每张卡片的特性可以分别选择。</p>
     <div class="attr-help" style="margin-bottom:18px">
-      <b>卡片等级：</b> 排斥(0)＝无卡 · 潜在(1)＝基础卡片 · 显著(2)＝小技能（基本功能＋2条特效） · 主导(3)＝大技能（基本功能＋3条特效）
+      <b>卡片等级：</b> 排斥(0)=无卡 · 潜在(1)=基础卡片 · 显著(2)=小技能（基本功能+2条特效） · 主导(3)=大技能（基本功能+3条特效）
       <br><b>两组卡片：</b> 你选择的两种攻击模式各对应一组卡片。两组卡片构成相同，但每张卡片的特性可以分别选择。
       <br><b>切换攻击模式：</b> 切换攻击模式时使用对应的卡片组，两组独立计算消耗和刷新。
     </div>
@@ -1922,7 +1940,7 @@ function renderCardTraitSelect(body,gid){
     const card=document.createElement("div");
     card.className=`sin-card choice sin-${sinKey}${entry.trait===t?" sel":""}`;
     const level=val>=3?"large":val>=2?"small":"basic";
-    const baseEffect=level==="basic"?CARD_BASE_EFFECT[t]:CARD_SKILL_BASE[t]?.[level]||"";
+    const baseEffect=level==="basic"?cardBaseEffect(t,sinKey):cardSkillBase(t,sinKey,level);
     const clashAttr=traitClashAttr(t);
     card.innerHTML=`
       <div class="sin-head"><span class="sin-name">${TRAIT_LABELS[t]}</span>
@@ -1981,7 +1999,7 @@ function renderCardQA(body,gid){
     return;
   }
   const levelLabel=level==="large"?"大技能":"小技能";
-  const baseEffect=CARD_SKILL_BASE[entry.trait]?.[level]||"";
+  const baseEffect=cardSkillBase(entry.trait,sinKey,level);
   // 渲染问答
   const qaHtml=qa.map((q,qi)=>{
     const selected=entry.answers[qi];
@@ -2070,7 +2088,6 @@ function renderCardPreview(body){
       if(clashInfo.clash){
         clashHtml=`<div class="card-clash"><span class="pill core">拼点</span> ${clashInfo.formula}`;
         if(clashInfo.dmg) clashHtml+=`<br><span class="card-dmg">${clashInfo.dmg}</span>`;
-        if(clashInfo.noDefDmg) clashHtml+=`<br><span class="card-dmg">${clashInfo.noDefDmg}</span>`;
         clashHtml+="</div>";
       }else{
         clashHtml=`<div class="card-clash"><span class="pill rej">不拼点</span> 打出即生效</div>`;
@@ -2080,9 +2097,9 @@ function renderCardPreview(body){
     let effectHtml="";
     if(entry.trait){
       if(level==="basic"){
-        effectHtml=`<div class="card-effect">${CARD_BASE_EFFECT[entry.trait]||""}</div>`;
+        effectHtml=`<div class="card-effect">${cardBaseEffect(entry.trait,k)}</div>`;
       }else{
-        effectHtml=`<div class="card-effect"><b>基础：</b>${CARD_SKILL_BASE[entry.trait]?.[level]||""}</div>`;
+        effectHtml=`<div class="card-effect"><b>基础：</b>${cardSkillBase(entry.trait,k,level)}</div>`;
         const qa=getSinQA(k,entry.trait,level);
         (entry.answers||[]).forEach((a,i)=>{
           if(a!=null && qa[i]?.options?.[a]) effectHtml+=`<div class="card-effect">▸ <b>${qa[i].options[a].label}</b>——${qa[i].options[a].effect}</div>`;
@@ -2104,7 +2121,20 @@ function renderCardPreview(body){
     const cards=SIN_ORDER.filter(k=>state.sins.values[k]>0).map(k=>{
       const val=state.sins.values[k];
       const entry=g[k]||{};
-      return mkCardHtml(k,val,entry,gid);
+      let html=mkCardHtml(k,val,entry,gid);
+      if(entry.trait==="multiAttack"){
+        const ex=extraAttackCard(k,gid);
+        html+=`<div class="sin-card sin-${k} preview-card" style="margin-left:24px">
+          <div class="sin-head">
+            <span class="sin-sym">${sinIcon(k)}</span>
+            <span class="sin-name">${ex.name}</span>
+            <span class="sin-count">${ex.note}</span>
+          </div>
+          <div class="card-clash"><span class="pill core">拼点</span> ${ex.clash.formula}<br><span class="card-dmg">${ex.clash.dmg}</span></div>
+          <div class="card-effect">${ex.effect}</div>
+        </div>`;
+      }
+      return html;
     }).join("");
     return `<div class="sheet">
       <h4>${gid==="a"?"A":"B"}组 · ${groupModeDesc(gid)}</h4>
@@ -2154,9 +2184,9 @@ function renderStep3(){
       let clashTag=clashInfo?(clashInfo.clash?`<span class="pill core">拼点</span>`:`<span class="pill rej">不拼点</span>`):"";
       let effectLines="";
       if(entry.trait){
-        if(level==="basic") effectLines=CARD_BASE_EFFECT[entry.trait]||"";
+        if(level==="basic") effectLines=cardBaseEffect(entry.trait,k);
         else{
-          effectLines=`<b>基础：</b>${CARD_SKILL_BASE[entry.trait]?.[level]||""}`;
+          effectLines=`<b>基础：</b>${cardSkillBase(entry.trait,k,level)}`;
           const qa=getSinQA(k,entry.trait,level);
           (entry.answers||[]).forEach((a,i)=>{
             if(a!=null && qa[i]?.options?.[a]) effectLines+=`<br>▸ <b>${qa[i].options[a].label}</b>——${qa[i].options[a].effect}`;
@@ -2167,9 +2197,13 @@ function renderStep3(){
       if(clashInfo&&clashInfo.clash){
         clashDetail=`<br><span style="color:var(--accent-2);font-size:12px">${clashInfo.formula}</span>`;
         if(clashInfo.dmg) clashDetail+=`<br><span style="color:var(--accent-2);font-size:12px">${clashInfo.dmg}</span>`;
-        if(clashInfo.noDefDmg) clashDetail+=`<br><span style="color:var(--accent-2);font-size:12px">${clashInfo.noDefDmg}</span>`;
       }
-      return `<tr><td class="c-sin"><span class="sin-icon-inline">${sinIcon(k)}</span>${SIN_LABELS[k]}</td><td class="c-lv">${levelText}</td><td class="c-tr">${traitText}${clashTag?`<br>${clashTag}`:''}</td><td>${effectLines||'—'}${clashDetail}</td></tr>`;
+      let row=`<tr><td class="c-sin"><span class="sin-icon-inline">${sinIcon(k)}</span>${SIN_LABELS[k]}</td><td class="c-lv">${levelText}</td><td class="c-tr">${traitText}${clashTag?`<br>${clashTag}`:''}</td><td>${effectLines||'—'}${clashDetail}</td></tr>`;
+      if(entry.trait==="multiAttack"){
+        const ex=extraAttackCard(k,gid);
+        row+=`<tr><td class="c-sin" style="padding-left:24px"><span class="sin-icon-inline">${sinIcon(k)}</span>${SIN_LABELS[k]}</td><td class="c-lv">追加</td><td class="c-tr">攻击<br><span class="pill core">拼点</span></td><td>${ex.effect}<br><span style="color:var(--accent-2);font-size:12px">${ex.clash.formula}</span><br><span style="color:var(--accent-2);font-size:12px">${ex.clash.dmg}</span><br><span style="color:var(--muted);font-size:12px">${ex.note}</span></td></tr>`;
+      }
+      return row;
     }).join("");
     return `<h4>${gid==="a"?"A":"B"}组 · ${groupModeDesc(gid)}</h4><table class="cards"><tr class="thead"><td class="c-sin">罪孽</td><td class="c-lv">等级</td><td class="c-tr">特性</td><td>效果</td></tr>${rows}</table>`;
   };
@@ -2192,11 +2226,7 @@ function renderStep3(){
       <table class="sh">
         <tr><td>最大生命值</td><td>${maxHP()}</td></tr>
         <tr><td>混乱线</td><td>${panic1()} / ${panic2()}</td></tr>
-        <tr><td>防御拼点</td><td>1D6 ＋ 体魄(${state.attrs.体魄})</td></tr>
-        <tr><td>速度 / 接线</td><td>${["a","b"].map(g=>{
-          const mk=state.attackModes[g==="a"?0:1];
-          return mk?`${g.toUpperCase()}组 ${ATTACK_MODES[mk].label}：${modeSpeedInfo(mk).speedText}`:`${g.toUpperCase()}组 未选择模式`;
-        }).join("<br>")}</td></tr>
+        <tr><td>防御拼点</td><td>1D6 + 体魄(${state.attrs.体魄})</td></tr>
         <tr><td>行动槽</td><td>${ACTION_SLOTS}</td></tr>
       </table>
     </div>
@@ -2206,7 +2236,7 @@ function renderStep3(){
         <tr><td>罪孽数值</td><td>${SIN_ORDER.map(k=>`${SIN_LABELS[k]}${state.sins.values[k]}`).join(" · ")}</td></tr>
         <tr><td>核心罪孽</td><td>${sinName(state.sins.coreSin)}</td></tr>
         <tr><td>排斥罪孽</td><td>${(state.sins.rejectedSins&&state.sins.rejectedSins.length)?state.sins.rejectedSins.map(k=>SIN_LABELS[k]).join("、"):'—'}</td></tr>
-        <tr><td>初始罪孽压力</td><td>${state.sins.sinPressure} / ${sinPressureCap()}（上限 ＝ 意志 ＋ 2）</td></tr>
+        <tr><td>初始罪孽压力</td><td>${state.sins.sinPressure} / ${sinPressureCap()}（上限 = 意志 + 2）</td></tr>
       </table>
     </div>
     <div class="sheet">
@@ -2221,11 +2251,12 @@ function renderStep3(){
           <tr><td>罪孽属性</td><td><span class="sin-icon-inline">${sinIcon(eg.sin)}</span>${eg.sinLabel}</td></tr>
           <tr><td>等级</td><td>${eg.grade}</td></tr>
           <tr><td>类型</td><td>${eg.typeLabel}</td></tr>
-          <tr><td>特效数量</td><td>共感(${state.attrs.共感}) ＝ ${eg.effectCount} 条</td></tr>
+          <tr><td>特效数量</td><td>共感(${state.attrs.共感}) = ${eg.effectCount} 条</td></tr>
           <tr><td>碎片消耗 / 侵蚀阈值</td><td>${eg.shardCost} / ${eg.corrosionDC}</td></tr>
           <tr><td>碎片承载上限</td><td>${eg.shardCap}</td></tr>
-          <tr><td>当前碎片</td><td>＿＿＿（战斗中手动填写）</td></tr>
+          <tr><td>当前碎片</td><td>___（战斗中手动填写）</td></tr>
           <tr><td>基础功能</td><td>${eg.baseEffect}</td></tr>
+          <tr><td>拼点</td><td>${eg.clash?`${eg.clash.formula}<br>${eg.clash.dmg}`:'不拼点，打出即生效'}</td></tr>
           <tr><td>罪孽专属特效</td><td>${eg.sinEffect?`${eg.sinEffect.label}——${eg.sinEffect.effect}`:'—'}</td></tr>
         </table>
         <table class="sh" style="margin-top:8px">${qaRows}</table>
@@ -2235,8 +2266,8 @@ function renderStep3(){
     <div class="sheet">
       <h4>攻击模式</h4>
       <table class="sh">
-        <tr><td>A 组</td><td>${modeALabel}</td></tr>
-        <tr><td>B 组</td><td>${modeBLabel}</td></tr>
+        <tr><td>A 组</td><td>${groupModeDesc("a")}</td></tr>
+        <tr><td>B 组</td><td>${groupModeDesc("b")}</td></tr>
       </table>
     </div>
     <div class="sheet">
@@ -2269,11 +2300,8 @@ function renderSummary(){
     <div style="height:10px"></div>
     <div class="srow editable" data-goto="2"><span class="sk">生命值</span><span class="sv">${maxHP()}</span></div>
     <div class="srow editable" data-goto="2"><span class="sk">混乱线</span><span class="sv">${panic1()} / ${panic2()}</span></div>
-    <div class="srow editable" data-goto="2"><span class="sk">防御拼点</span><span class="sv">1D6＋${state.attrs.体魄}</span></div>
-    <div class="srow editable" data-goto="5"><span class="sk">速度 A / B</span><span class="sv">${["a","b"].map(g=>{
-      const mk=state.attackModes[g==="a"?0:1];
-      return mk?modeSpeedInfo(mk).speedText:"—";
-    }).join(" / ")}</span></div>
+    <div class="srow editable" data-goto="2"><span class="sk">防御拼点</span><span class="sv">1D6 + ${state.attrs.体魄}</span></div>
+
     <div style="height:10px"></div>
     <div class="srow editable" data-goto="3"><span class="sk">核心罪孽</span><span class="sv">${sinName(state.sins.coreSin)}</span></div>
     <div class="srow editable" data-goto="3"><span class="sk">排斥罪孽</span><span class="sv">${(state.sins.rejectedSins&&state.sins.rejectedSins.length)?state.sins.rejectedSins.map(k=>SIN_LABELS[k]).join("、"):'—'}</span></div>
@@ -2293,13 +2321,12 @@ function renderSummary(){
 
 /* ============ 导出 ============ */
 function buildData(){
-  // 速度绑定攻击模式，按组导出
-  const speedByGroup={};
+  // 攻击模式按组导出：模式名、拼点属性、副效果三合一，与页面/图片同源
+  const modeByGroup={};
   ["a","b"].forEach(g=>{
     const mk=state.attackModes[g==="a"?0:1];
-    const si=mk?modeSpeedInfo(mk):null;
-    speedByGroup[g.toUpperCase()+"组"]= si
-      ? {模式:ATTACK_MODES[mk].label, 速度:si.speedText, 接线方式:si.rule}
+    modeByGroup[g.toUpperCase()+"组"]= mk
+      ? {模式:ATTACK_MODES[mk].label, 拼点属性:ATTACK_MODES[mk].attr, 副效果:ATTACK_MODES[mk].bonus}
       : null;
   });
   return {
@@ -2311,7 +2338,6 @@ function buildData(){
       第一混乱线:panic1(),
       第二混乱线:panic2(),
       防御拼点:`1D6 + 体魄(${state.attrs.体魄})`,
-      速度与接线:speedByGroup,
       行动槽:ACTION_SLOTS
     },
     // 罪孽数据
@@ -2324,7 +2350,7 @@ function buildData(){
     },
     // E.G.O 数据
     ego: buildEgoExport(),
-    攻击模式:{a:state.attackModes[0],b:state.attackModes[1]},
+    攻击模式:modeByGroup,
     罪孽卡片:{a:buildCardGroupExport("a"),b:buildCardGroupExport("b")}
   };
 }
@@ -2440,12 +2466,6 @@ function paintSheet(ctx, H, measure){
   line("混乱线", panic1()+" / "+panic2());
   line("防御拼点", "1D6 + 体魄("+state.attrs.体魄+")");
   line("行动槽", String(ACTION_SLOTS));
-  ["a","b"].forEach(g=>{
-    const mk=state.attackModes[g==="a"?0:1];
-    const si=mk?modeSpeedInfo(mk):null;
-    line(g.toUpperCase()+"组速度 / 接线",
-      si ? ATTACK_MODES[mk].label+" · "+si.speedText+" · "+si.rule : "未选择模式");
-  });
 
   const p=state.sins;
   label("罪孽倾向");
@@ -2468,14 +2488,16 @@ function paintSheet(ctx, H, measure){
     line("碎片消耗 / 侵蚀阈值", eg.shardCost+" / "+eg.corrosionDC);
     line("碎片承载上限", String(eg.shardCap));
     line("基础功能", eg.baseEffect);
+    if(eg.clash){ line("拼点", eg.clash.formula); line("伤害", eg.clash.dmg); }
+    else line("拼点", "不拼点，打出即生效");
     if(eg.sinEffect) line("罪孽专属特效", eg.sinEffect.label+"——"+eg.sinEffect.effect);
     eg.qa.forEach((q,i)=>{ line("问"+(i+1), q.label+"——"+q.effect); });
     line("显现描述", eg.description||"—");
   }
 
   label("攻击模式");
-  line("A 组", state.attackModes[0]?ATTACK_MODES[state.attackModes[0]].label:"—");
-  line("B 组", state.attackModes[1]?ATTACK_MODES[state.attackModes[1]].label:"—");
+  line("A 组", groupModeDesc("a"));
+  line("B 组", groupModeDesc("b"));
 
   const groupBlock=(gid)=>{
     const g=state.cardGroups[gid];
@@ -2496,14 +2518,21 @@ function paintSheet(ctx, H, measure){
       }
       if(entry.trait){
         if(level==="basic"){
-          indent("▸ "+(CARD_BASE_EFFECT[entry.trait]||""));
+          indent("▸ "+cardBaseEffect(entry.trait,k));
         }else{
-          indent("▸ 基础："+(CARD_SKILL_BASE[entry.trait]?.[level]||""));
+          indent("▸ 基础："+cardSkillBase(entry.trait,k,level));
           const qa=getSinQA(k,entry.trait,level);
           (entry.answers||[]).forEach((a,i)=>{
             if(a!=null && qa[i]?.options?.[a]) indent("▸ "+qa[i].options[a].label+"——"+qa[i].options[a].effect);
           });
         }
+      }
+      if(entry.trait==="multiAttack"){
+        const ex=extraAttackCard(k,gid);
+        line("　└ "+ex.name, ex.note+" [拼点]", "#e6c76a", IMG_F_BODY_B);
+        indent("拼点："+ex.clash.formula,"#c8a24b");
+        indent("伤害："+ex.clash.dmg,"#c8a24b");
+        indent("▸ "+ex.effect);
       }
       y+=8;
     });
@@ -2569,9 +2598,30 @@ const DEPRECATED_OPTIONS = [
   // 「变招」原为「两次攻击可以使用不同的拼点属性」，拼点属性绑定攻击模式后改写
   {sin:"pride", trait:"multiAttack", level:"small", q:0, o:2},
   {sin:"pride", trait:"multiAttack", level:"large", q:0, o:2},
+  // 速度系统删除后，以下选项原本写的是「当前速度 ±N」，已逐条改写为别的效果
+  {sin:"wrath", trait:"defense", level:"small", q:0, o:2},
+  {sin:"wrath", trait:"defense", level:"large", q:0, o:2},
+  {sin:"lust", trait:"buff", level:"small", q:0, o:2},
+  {sin:"lust", trait:"buff", level:"large", q:0, o:2},
+  {sin:"gluttony", trait:"special", level:"small", q:1, o:2},
+  {sin:"gluttony", trait:"special", level:"large", q:1, o:2},
+  {sin:"gloom", trait:"attack", level:"small", q:0, o:1},
+  {sin:"gloom", trait:"attack", level:"large", q:0, o:1},
+  {sin:"gloom", trait:"debuff", level:"small", q:0, o:2},
+  {sin:"gloom", trait:"debuff", level:"large", q:0, o:2},
+  {sin:"gloom", trait:"debuff", level:"large", q:2, o:2},
+  {sin:"envy", trait:"attack", level:"small", q:0, o:1},
+  {sin:"envy", trait:"attack", level:"large", q:0, o:1},
+  {sin:"envy", trait:"support", level:"small", q:0, o:2},
+  {sin:"envy", trait:"support", level:"large", q:0, o:2},
   // 「压制」原为「目标不能对第二次攻击进行防御」——会触发无防御卡规则、差值暴涨，改为定额加伤
   {sin:"pride", trait:"multiAttack", level:"small", q:1, o:1},
   {sin:"pride", trait:"multiAttack", level:"large", q:1, o:1},
+  // 多重攻击的加骰改为加伤：两次攻击叠加拼点骰会让命中率逼近必中
+  {sin:"pride", trait:"multiAttack", level:"small", q:0, o:1},
+  {sin:"pride", trait:"multiAttack", level:"large", q:0, o:1},
+  {sin:"pride", trait:"multiAttack", level:"small", q:2, o:2},
+  {sin:"pride", trait:"multiAttack", level:"large", q:2, o:2},
   // 怠惰·反击大技能改为爆发输出，第二问的「厚积薄发」与第三问整题被替换
   {sin:"sloth", trait:"counter", level:"large", q:1, o:0},
   {sin:"sloth", trait:"counter", level:"large", q:2, o:0},
