@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Limbus Company TRPG · 战斗计算器</title>
+<link rel="stylesheet" href="建卡器.css?v=3">
+</head>
+<body>
+<div class="app app-wide">
+  <header class="top">
+    <div class="brand">
+      <h1>Limbus Company TRPG · 战斗计算器</h1>
+      <div class="sub">Combat Tracker</div>
+      <a class="btn ghost btn-goto" href="index.html">← 建卡器</a>
+      <a class="btn ghost btn-reset" href="鉴定器.html">🎲 鉴定器</a>
+    </div>
+    <div class="round-bar">
+      <span class="round-no">第 <b id="roundNo">1</b> 回合</span>
+      <span class="round-tally" id="roundTally"></span>
+      <button class="btn" id="btnNextRound">下一回合 →</button>
+      <button class="btn ghost" id="btnResetAll">↺ 重置战斗</button>
+    </div>
+  </header>
+
+  <main class="stage">
+    <!-- 聚光灯 -->
+    <div class="card" id="spotCard">
+      <h2>聚光灯</h2>
+      <p class="lead">每回合每人只能被选中一次。选中后按槽位逐张出牌。</p>
+      <div id="spotPick"></div>
+      <div id="spotBody"></div>
+    </div>
+
+    <div class="card" style="margin-top:20px">
+      <h2>战斗日志</h2>
+      <div id="log"><p class="empty">还没有记录。</p></div>
+    </div>
+  </main>
+
+  <aside class="summary">
+    <div class="card">
+      <h3 class="sec-head">我方 <button class="btn ghost mini" id="btnImport">⇩ 导入角色</button></h3>
+      <input type="file" id="fileInput" accept=".json,application/json" multiple hidden>
+      <div id="players"><p class="empty">尚未导入角色。<br>用建卡器的「导出 JSON」得到文件。</p></div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <h3 class="sec-head">敌人 <button class="btn ghost mini" id="btnAddEnemy">＋ 新增</button></h3>
+      <div id="enemies"><p class="empty">尚未添加敌人。</p></div>
+    </div>
+  </aside>
+</div>
+
+<div class="toast" id="toast"></div>
+<script src="战斗器.js?v=3"></script>
+</body>
+</html>

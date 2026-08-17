@@ -147,7 +147,7 @@ const SIN_TRAIT_OPTIONS = {
 };
 const SIN_CONDITIONAL_TRAITS = {
   gluttony:{special:2},
-  pride:{multiAttack:2}
+  pride:{multiAttack:3}   // 双重打击是大技能专属
 };
 const TRAIT_LABELS = {
   attack:"攻击", defense:"防御", buff:"增益", shield:"援护",
@@ -197,7 +197,7 @@ const CARD_SKILL_BASE = {
 };
 
 /* 多重攻击：本卡自身的基础伤害。追加的那张卡用该罪孽「攻击·小技能」的值 */
-const MULTI_ATTACK_OWN = {small:2, large:4};
+const MULTI_ATTACK_OWN = {large:3};   // 大技能专属，两次攻击各自的基础伤害
 /* 「精益求精」在大技能第三问的第二个选项：追加卡也获得本卡的一条特效，
    需要玩家再指定是哪一条，因此额外存一个 extraEffect（记的是问题序号，
    这样之后改了那一问的答案，分给追加卡的特效会自动跟着变）。 */
@@ -220,14 +220,15 @@ function pickedExtraEffect(sinKey, entry, level){
   return extraEffectChoices(sinKey, entry, level).find(c=>c.qi===entry.extraEffect) || null;
 }
 
-/* 多重攻击追加的那张卡：该罪孽的普通攻击（基础卡，无问答特效）——导出时与主卡一起列出 */
+/* 多重攻击结算后塞进卡组的那张卡：该罪孽的普通攻击（基础卡，无问答特效）。
+   它不在本回合打出，而是留在组里，是成本不是收益。 */
 function extraAttackCard(sinKey, gid){
   const entry = state.cardGroups[gid]?.[sinKey] || {};
   const level = state.sins.values[sinKey]>=3 ? "large" : "small";
   const granted = pickedExtraEffect(sinKey, entry, level);
   return {
     name: `${SIN_LABELS[sinKey]} · 普通攻击`,
-    note: "由多重攻击追加",
+    note: "多重攻击结算后加入本组（未使用）",
     effect: `基础伤害 ${sinAttackDamage(sinKey,"basic")} + 差值`,
     granted: granted ? {label:granted.label, effect:granted.effect} : null,
     clash: getClashInfo("attack", gid)
@@ -242,9 +243,9 @@ function cardBaseEffect(trait, sinKey){
 function cardSkillBase(trait, sinKey, level){
   if(trait==="attack") return `基础伤害 ${sinAttackDamage(sinKey,level)} + 差值`;
   if(trait==="multiAttack"){
-    return `本回合额外加入一张「${SIN_LABELS[sinKey]} · 普通攻击」并一并打出，`
-      + `共发动两次攻击、各自独立拼点。本卡基础伤害 ${MULTI_ATTACK_OWN[level]} + 差值；`
-      + `追加卡基础伤害 ${sinAttackDamage(sinKey,"basic")} + 差值`;
+    return `本回合发动两次攻击、各自独立拼点，每次基础伤害 ${MULTI_ATTACK_OWN[level]} + 差值。`
+      + `其中任意一次若为单方面攻击（目标没有可对抗的意图），该次不计差值。`
+      + `结算后将一张「${SIN_LABELS[sinKey]} · 普通攻击」加入本组（未使用）——本组循环因此变长`;
   }
   return CARD_SKILL_BASE[trait]?.[level]||"";
 }
@@ -613,7 +614,7 @@ const SIN_TRAIT_QA = {
           {label:"优越",effect:"若你的当前 HP 高于目标，伤害 +2"}
         ]},
         {question:"你的方式是什么？",options:[
-          {label:"完美计算",effect:"你可以在看到本次意图值后，再决定是否使用此卡（若不用则不消耗）"},
+          {label:"完美计算",effect:"本次拼点不投骰，拼点值固定为 3 + 属性 + 拼点修正"},
           {label:"全面压制",effect:"本次攻击无视目标的防御意图，直接与其攻击意图拼点"},
           {label:"临机应变",effect:"若拼点失败，你立即打出一张防御卡作为反应（额外消耗该卡）"}
         ]}
@@ -625,7 +626,7 @@ const SIN_TRAIT_QA = {
           {label:"优越",effect:"若你的当前 HP 高于目标，伤害 +3"}
         ]},
         {question:"你的方式是什么？",options:[
-          {label:"完美计算",effect:"你可以在看到本次意图值后，再决定是否使用此卡（若不用则不消耗）"},
+          {label:"完美计算",effect:"本次拼点不投骰，拼点值固定为 4 + 属性 + 拼点修正"},
           {label:"全面压制",effect:"本次攻击无视目标的防御意图；且本轮该目标的防御意图对所有友方失效"},
           {label:"临机应变",effect:"若拼点失败，你仅受到基础伤害，且对目标造成 2 点伤害"}
         ]},
@@ -646,7 +647,7 @@ const SIN_TRAIT_QA = {
         {question:"你的防线有什么特色？",options:[
           {label:"无懈可击",effect:"本次意图值 -1"},
           {label:"指挥若定",effect:"防御胜利时，一名友方本轮拼点骰 +1"},
-          {label:"游刃有余",effect:"防御成功后，你可以免费切换攻击模式"}
+          {label:"不容置疑",effect:"防御成功时，攻击者本轮不能再对你使用意图"}
         ]}
       ],
       large:[
@@ -668,33 +669,21 @@ const SIN_TRAIT_QA = {
       ]
     },
     multiAttack:{
-      small:[
+      large:[
         {question:"你如何展开双重打击？",options:[
           {label:"连击",effect:"两次攻击的目标可以不同"},
           {label:"集中",effect:"两次攻击对同一目标时，第二次攻击的伤害 +2"},
           {label:"变招",effect:"第二次攻击改用你另一组攻击模式的拼点属性（两组模式相同时改为第二次攻击的伤害 +2）"}
         ]},
         {question:"多重攻击的节奏是？",options:[
-          {label:"迅捷",effect:"两次攻击在本回合内连续结算"},
+          {label:"不懈",effect:"若第一次攻击未命中，第二次攻击的拼点骰 +2"},
           {label:"压制",effect:"若第一次攻击命中，第二次攻击的伤害 +1"},
-          {label:"灵活",effect:"你可以在第一次攻击结果出来后，再决定第二次攻击的目标"}
-        ]}
-      ],
-      large:[
-        {question:"你如何展开双重打击？",options:[
-          {label:"连击",effect:"两次攻击的目标可以不同"},
-          {label:"集中",effect:"两次攻击对同一目标时，第二次攻击的伤害 +3"},
-          {label:"变招",effect:"第二次攻击改用你另一组攻击模式的拼点属性（两组模式相同时改为第二次攻击的伤害 +3）"}
-        ]},
-        {question:"多重攻击的节奏是？",options:[
-          {label:"迅捷",effect:"两次攻击在本回合内连续结算"},
-          {label:"压制",effect:"若第一次攻击命中，第二次攻击的伤害 +2"},
           {label:"灵活",effect:"你可以在第一次攻击结果出来后，再决定第二次攻击的目标"}
         ]},
         {question:"双重打击的极致是？",options:[
           {label:"无间断",effect:"若两次攻击均命中，取消目标本轮尚未结算的所有意图"},
-          {label:"精益求精",effect:"你加入的那张额外攻击卡也获得本卡的一条特效"},
-          {label:"【切换】绝对支配",effect:"切换到此攻击模式时，本回合两次攻击的伤害各 +2"}
+          {label:"精益求精",effect:"加入卡组的那张普通攻击也获得本卡的一条特效"},
+          {label:"【切换】绝对支配",effect:"切换到此攻击模式时，本回合两次攻击的伤害各 +1"}
         ]}
       ]
     }
@@ -740,7 +729,7 @@ const SIN_TRAIT_QA = {
         ]},
         {question:"防御后你得到了什么？",options:[
           {label:"经验",effect:"防御成功时你获得 2 点临时生命"},
-          {label:"稳固",effect:"防御成功时你恢复 2 HP"},
+          {label:"见异思迁",effect:"防御成功后，你可以免费切换攻击模式"},
           {label:"冷静",effect:"防御成功时你的罪孽压力 -1（最低为0）"}
         ]}
       ],
@@ -1166,6 +1155,13 @@ function validateCardGroup(gid){
 }
 
 /* 构建卡片组导出数据 */
+/* clash 是页面与图片才用的拼点文案（每张卡都在复述同一条规则），
+   JSON 里一律剥掉——战斗计算器按 clashAttr / baseDamage 自己算 */
+function withoutClash(obj){
+  if(!obj) return obj;
+  const {clash, ...rest} = obj;
+  return rest;
+}
 /* 获取特性的拼点信息 */
 function getClashInfo(trait, gid){
   const modeKey=state.attackModes[gid==="a"?0:1];
@@ -1209,10 +1205,21 @@ function buildCardGroupExport(gid){
         });
       }
     }
+    const modeKey=state.attackModes[gid==="a"?0:1];
     result[k]={
-      level, trait:entry.trait||null, effects,
-      clash: entry.trait? getClashInfo(entry.trait, gid) : null,
-      extraCard: entry.trait==="multiAttack" ? extraAttackCard(k, gid) : null
+      sin:k, sinLabel:SIN_LABELS[k],
+      level, levelLabel: level==="basic"?"基础":level==="small"?"小技能":"大技能",
+      trait:entry.trait||null, traitLabel: entry.trait?TRAIT_LABELS[entry.trait]:null,
+      // 下面三项是给战斗计算器用的结构化数值，避免它反过来解析卡面文本
+      baseDamage: entry.trait==="attack" ? sinAttackDamage(k,level)
+                : entry.trait==="multiAttack" ? MULTI_ATTACK_OWN[level] : null,
+      hits: entry.trait==="multiAttack" ? 2 : 1,
+      clashAttr: (entry.trait==="attack"||entry.trait==="multiAttack")
+                   ? (modeKey?ATTACK_MODES[modeKey].attr:null)
+                 : (entry.trait==="defense"||entry.trait==="shield"||entry.trait==="counter") ? "体魄"
+                 : null,
+      effects,
+      extraCard: entry.trait==="multiAttack" ? withoutClash(extraAttackCard(k, gid)) : null
     };
   }
   return result;
@@ -2486,6 +2493,8 @@ function renderSummary(){
 }
 
 /* ============ 导出 ============ */
+/* JSON 只用来导入战斗计算器，因此不带任何规则速查——规则以页面和图片导出为准。
+   这里只输出角色自身的数据：属性、衍生值、罪孽、E.G.O、两组卡片。 */
 function buildData(){
   // 攻击模式按组导出：模式名、拼点属性、副效果三合一，与页面/图片同源
   const modeByGroup={};
@@ -2515,14 +2524,7 @@ function buildData(){
       sinPressureCap:sinPressureCap()
     },
     // E.G.O 数据
-    ego: buildEgoExport(),
-    敌方意图速查:[...ENEMY_INTENTS.map(t=>({意图:t.name,规则:t.rule})),
-      ...INTENT_OPS.map(t=>({意图:t.name,规则:t.rule})),
-      ],
-    鉴定速查:[...CHECK_RULES.map(t=>({项:t.name,规则:t.rule})),
-      ...checkOddsTable().map(m=>({项:`${m.mode}通过率`,规则:`${m.note}；属性1~4 在难度1/2/3 下 `+m.rows.map(r=>r.odds.join("/")).join(" · ")}))],
-    罪孽压力速查:[...SIN_PRESSURE_RULES.map(t=>({项:t.name,规则:t.rule})),
-      {项:"本角色通过率",规则:`${state.attrs.意志} 次机会 · `+willCheckTable().map(r=>`难度${r.dc} ${r.text}`).join(" · ")}],
+    ego: withoutClash(buildEgoExport()),
     攻击模式:modeByGroup,
     罪孽卡片:{a:buildCardGroupExport("a"),b:buildCardGroupExport("b")}
   };
@@ -2804,6 +2806,18 @@ const DEPRECATED_OPTIONS = [
   // 「压制」原为「目标不能对第二次攻击进行防御」——会触发无防御卡规则、差值暴涨，改为定额加伤
   {sin:"pride", trait:"multiAttack", level:"small", q:1, o:1},
   {sin:"pride", trait:"multiAttack", level:"large", q:1, o:1},
+  // 空转文案重写：「迅捷」「完美计算」在现行规则下都不产生任何效果
+  {sin:"pride", trait:"multiAttack", level:"large", q:1, o:0},
+  {sin:"pride", trait:"attack", level:"small", q:1, o:0},
+  {sin:"pride", trait:"attack", level:"large", q:1, o:0},
+  // 傲慢：多重攻击提为大技能专属、追加卡改为塞进卡组、数值下调；切换收归大技能
+  {sin:"pride", trait:"multiAttack", level:"large", q:0, o:1},
+  {sin:"pride", trait:"multiAttack", level:"large", q:0, o:2},
+  {sin:"pride", trait:"multiAttack", level:"large", q:1, o:1},
+  {sin:"pride", trait:"multiAttack", level:"large", q:2, o:1},
+  {sin:"pride", trait:"multiAttack", level:"large", q:2, o:2},
+  {sin:"pride", trait:"defense", level:"small", q:1, o:2},
+  {sin:"envy", trait:"defense", level:"small", q:1, o:1},
   // 高伤技能加压力代价 / 新增降压力选项
   {sin:"wrath", trait:"attack", level:"large", q:1, o:2},
   {sin:"gluttony", trait:"attack", level:"large", q:1, o:2},

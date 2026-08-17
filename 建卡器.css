@@ -301,3 +301,63 @@ button:focus-visible,.subchip:focus-visible,.rdot:focus-visible,.dot:focus-visib
 /* 鉴定器没有右侧摘要以外的第二列，属性行沿用 srow 但要放得下步进器 */
 #attrEdit .srow{align-items:center}
 #attrEdit .stepper button{width:26px;height:26px;font-size:15px}
+
+/* ============ 战斗计算器 ============ */
+.app-wide{max-width:1360px;grid-template-columns:1fr 380px}
+.round-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  border-top:1px solid var(--line);padding-top:12px}
+.round-no{font-size:16px}
+.round-no b{color:var(--accent-2);font-size:22px}
+.round-tally{color:var(--muted);font-size:13px;margin-right:auto}
+.btn.mini{padding:3px 10px;font-size:12px;font-weight:400}
+
+.unit{background:#0e1016;border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px}
+.unit.on{border-color:var(--accent);box-shadow:0 0 0 2px rgba(200,162,75,.25)}
+.unit.foe{border-left:4px solid var(--danger)}
+.unit-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.unit-head b{font-size:15px}
+.unit-tag{margin-left:auto;font-size:11px;color:var(--muted)}
+.unit-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px}
+.unit-row label{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:4px}
+.unit-row input[type=number]{width:52px;background:#161923;border:1px solid var(--line);
+  color:var(--text);border-radius:6px;padding:3px 6px;font-size:13px}
+.unit-row select{background:#161923;border:1px solid var(--line);color:var(--text);
+  border-radius:6px;padding:3px 6px;font-size:12px}
+.unit-row.hint{color:var(--muted);font-size:11px}
+.name-input{flex:1;background:transparent;border:none;color:var(--text);font-size:15px;font-weight:700;
+  border-bottom:1px dashed var(--line);padding:2px 0}
+.name-input:focus{outline:none;border-bottom-color:var(--accent)}
+
+.bar{position:relative;height:18px;background:#161923;border-radius:9px;overflow:hidden;border:1px solid var(--line)}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--ok),#8fd39c)}
+.bar.foe i{background:linear-gradient(90deg,var(--danger),#e0837e)}
+.bar span{position:absolute;inset:0;text-align:center;font-size:11px;line-height:18px;color:var(--text)}
+
+.intents{display:flex;flex-direction:column;gap:5px;margin:8px 0}
+.intent{display:flex;align-items:center;gap:5px;background:#161923;border-radius:6px;padding:4px 6px;
+  border-left:3px solid var(--line)}
+.intent.i-attack{border-left-color:var(--danger)}
+.intent.i-buff{border-left-color:var(--ok)}
+.intent.i-debuff{border-left-color:#a24f9e}
+.intent.done{opacity:.45}
+.intent select{background:#0e1016;border:1px solid var(--line);color:var(--text);border-radius:5px;font-size:11px;padding:2px 4px}
+.intent .iv{width:46px;background:#0e1016;border:1px solid var(--accent);color:var(--accent-2);
+  border-radius:5px;padding:2px 5px;font-size:13px;font-weight:700;text-align:center}
+.intent .inote{flex:1;min-width:40px;background:#0e1016;border:1px solid var(--line);color:var(--text);
+  border-radius:5px;padding:2px 5px;font-size:11px}
+
+.card-pick{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px}
+.pick{background:#0e1016;border:1px solid var(--line);border-radius:9px;padding:10px 12px;cursor:pointer;transition:.15s}
+.pick:hover{border-color:var(--accent)}
+.pick.sel{border-color:var(--accent-2);box-shadow:0 0 0 2px rgba(230,199,106,.3)}
+.pick b{display:block;font-size:14px}
+.pick small{color:var(--muted);font-size:11px}
+.pick-eff{font-size:12px;color:var(--text);margin-top:5px;line-height:1.4}
+.gender-row .opt.done{opacity:.4}
+.manual{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}
+.manual input{width:60px;background:#0e1016;border:1px solid var(--line);color:var(--text);
+  border-radius:6px;padding:6px 8px}
+.logrow{background:#0e1016;border:1px solid var(--line);border-radius:8px;padding:10px 12px;
+  margin-bottom:8px;font-size:13px;line-height:1.6}
+.logrow b{color:var(--accent-2)}
+@media(max-width:1100px){ .app-wide{grid-template-columns:1fr} }
