@@ -4,10 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Limbus Company TRPG · 战斗计算器</title>
-<link rel="stylesheet" href="建卡器.css?v=3">
+<link rel="stylesheet" href="建卡器.css?v=23">
 </head>
 <body>
-<div class="app app-wide">
+<div class="app app-combat">
   <header class="top">
     <div class="brand">
       <h1>Limbus Company TRPG · 战斗计算器</h1>
@@ -23,13 +23,43 @@
     </div>
   </header>
 
+  <!-- 场上单位：始终在聚光灯上方，任何窗口宽度下都不会被挤到日志后面 -->
+  <section class="board">
+    <div class="card">
+      <h3 class="sec-head">我方 <button class="btn ghost mini" id="btnImport">⇩ 导入角色</button></h3>
+      <input type="file" id="fileInput" accept=".json,application/json" multiple hidden>
+      <div id="players"><p class="empty">尚未导入角色。<br>用建卡器的「导出 JSON」得到文件。</p></div>
+    </div>
+
+    <div class="card">
+      <h3 class="sec-head">敌人 <button class="btn ghost mini" id="btnAddEnemy">＋ 新增</button></h3>
+      <div id="enemies"><p class="empty">尚未添加敌人。</p></div>
+    </div>
+  </section>
+
   <main class="stage">
-    <!-- 聚光灯 -->
+    <!-- 聚光灯：出牌与接线都在这里 -->
     <div class="card" id="spotCard">
       <h2>聚光灯</h2>
-      <p class="lead">每回合每人只能被选中一次。选中后按槽位逐张出牌。</p>
+      <p class="lead">按槽位出牌。防御 / 援护 / 反击是接线卡——在自己的行动里主动打出，接下敌方某条攻击意图；不占行动槽，每轮限接一次，接的那一击也可以是打向队友的。</p>
+      <div id="spotFlow"></div>
       <div id="spotPick"></div>
       <div id="spotBody"></div>
+    </div>
+
+    <!-- 收尾：所有人行动完后，没人接下的攻击自动落地 -->
+    <div class="card" id="foeCard" hidden>
+      <h2>敌方攻击落地</h2>
+      <p class="lead">所有人都行动完了。以下攻击意图没人接线，逐条结算——也可以让还没接过线的人临时接下来。</p>
+      <div id="foeBody"></div>
+    </div>
+
+    <!-- 卡组浏览 / 手动弃牌 -->
+    <div class="card" id="deckCard" hidden style="margin-top:20px">
+      <h2 class="sec-head"><span id="deckTitle">卡组</span>
+        <button class="btn ghost mini" id="btnDeckClose">✕ 关闭</button></h2>
+      <p class="lead">问答特效里的「弃掉 N 张」是自然语言，只能手动执行——在这里点「弃掉」即可。弃牌与打出一样消耗卡组循环。</p>
+      <div id="deckBody"></div>
     </div>
 
     <div class="card" style="margin-top:20px">
@@ -37,22 +67,9 @@
       <div id="log"><p class="empty">还没有记录。</p></div>
     </div>
   </main>
-
-  <aside class="summary">
-    <div class="card">
-      <h3 class="sec-head">我方 <button class="btn ghost mini" id="btnImport">⇩ 导入角色</button></h3>
-      <input type="file" id="fileInput" accept=".json,application/json" multiple hidden>
-      <div id="players"><p class="empty">尚未导入角色。<br>用建卡器的「导出 JSON」得到文件。</p></div>
-    </div>
-
-    <div class="card" style="margin-top:16px">
-      <h3 class="sec-head">敌人 <button class="btn ghost mini" id="btnAddEnemy">＋ 新增</button></h3>
-      <div id="enemies"><p class="empty">尚未添加敌人。</p></div>
-    </div>
-  </aside>
 </div>
 
 <div class="toast" id="toast"></div>
-<script src="战斗器.js?v=3"></script>
+<script src="战斗器.js?v=23"></script>
 </body>
 </html>

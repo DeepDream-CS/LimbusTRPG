@@ -126,13 +126,14 @@ const INTENT_OPS = [
 /* 攻击模式（6.2）
    bonus 是该模式在本组所有拼点中持续生效的副效果——三条形状不同：
    斩击提高命中率、打击提高收益、突刺提供保底。 */
+/* stats 是 bonus 那句话的机器可读版本，供战斗计算器直接套用——改文案时要一起改 */
 const ATTACK_MODES = {
   slash:  {label:"斩击", attr:"灵巧", desc:"以迅捷与精准斩开对手",
-           bonus:"本组的所有拼点骰 +1"},
+           bonus:"本组的所有拼点骰 +1", stats:{dice:1}},
   strike: {label:"打击", attr:"力量", desc:"以沉重力量碾压对手",
-           bonus:"本组拼点胜利时，本次伤害额外 +2"},
+           bonus:"本组拼点胜利时，本次伤害额外 +2", stats:{winDamage:2}},
   pierce: {label:"突刺", attr:"认知", desc:"以精准判断直取要害",
-           bonus:"本组拼点失败时，你仍对对方造成 3 点伤害"}
+           bonus:"本组拼点失败时，你仍对对方造成 3 点伤害", stats:{loseDamage:3}}
 };
 
 /* 罪孽特性可用表（7.2） */
@@ -196,6 +197,42 @@ const CARD_SKILL_BASE = {
   multiAttack:{small:"", large:""}
 };
 
+/* 上面两张表是给人读的卡面文案；这张是同一批规则的机器可读版本，供战斗计算器直接结算，
+   免得它反过来解析中文。攻击类的数值已由 baseDamage / hits 提供，故不在此表。
+   字段含义：
+     win/lose      拼点胜负分支      block 完全格挡 · damage 对攻击者造成的伤害
+     heal/temp     恢复 HP / 临时生命   allySafe 友方不受伤害 · takeForAlly 替友方承伤
+     intentDown    敌人本轮意图值 -N    diceUp 本轮拼点骰 +N · discard 需弃掉的牌数
+     require       打出条件           groupFull 本组全未使用 · groupEmpty 本组已无其他可用牌
+   改动任一条时，CARD_BASE_EFFECT / CARD_SKILL_BASE 的文案要同步改。 */
+const CARD_BASE_STATS = {
+  defense:{
+    basic:{win:{block:true}, lose:{heal:2}},
+    small:{win:{block:true}, lose:{heal:5}},
+    large:{win:{block:true}, lose:{heal:8}}
+  },
+  counter:{
+    basic:{win:{block:true, damage:3}, lose:{temp:2}},
+    small:{win:{block:true, damage:5}, lose:{temp:3}},
+    // 大技能：空组时的爆发，把攒下的临时生命一次性换成伤害
+    large:{require:"groupEmpty", consumeTemp:true, base:5, tempCap:4, thenSwitch:true,
+           win:{block:true, damagePlusMargin:true}, lose:{takeDamage:true, damageHalf:true}}
+  },
+  shield:{
+    basic:{win:{allySafe:true}, lose:{takeForAlly:true, temp:2}},
+    small:{win:{allySafe:true, temp:3}, lose:{takeForAlly:true, temp:5}},
+    // 大技能：满组时把整组弃掉换成壳
+    large:{require:"groupFull", discardRest:true, tempPerDiscard:3, thenSwitch:true,
+           win:{allySafe:true}, lose:{takeForAlly:true}}
+  },
+  buff:   {basic:{heal:2}, small:{heal:3, temp:2}, large:{heal:5, temp:4}},
+  debuff: {basic:{intentDown:1}, small:{intentDown:2}, large:{intentDown:3}},
+  support:{basic:{diceUp:1}, small:{diceUp:2}, large:{diceUp:3}},
+  // 特殊是暴食≥2 才解锁的条件特性，没有基础档
+  special:{small:{discard:1, heal:3}, large:{discard:2, heal:5}}
+};
+function cardBaseStats(trait, level){ return CARD_BASE_STATS[trait]?.[level] || null; }
+
 /* 多重攻击：本卡自身的基础伤害。追加的那张卡用该罪孽「攻击·小技能」的值 */
 const MULTI_ATTACK_OWN = {large:3};   // 大技能专属，两次攻击各自的基础伤害
 /* 「精益求精」在大技能第三问的第二个选项：追加卡也获得本卡的一条特效，
@@ -250,34 +287,58 @@ function cardSkillBase(trait, sinKey, level){
   return CARD_SKILL_BASE[trait]?.[level]||"";
 }
 
-/* 七罪技能特效问答数据（8.1-8.7） */
+/* 七罪技能特效问答数据（8.1-8.7）
+
+   选项上的 stats 是这句话的机器可读版本，供战斗计算器直接结算，与 CARD_BASE_STATS 同构，
+   多一个 scope 说明作用对象。没有 stats 的选项 = 条件类，界面上标「需自行结算」。
+     scope   target 目标 · adjOne 相邻的一名敌人 · adjAll 相邻的所有敌人 · allFoes 所有敌人
+             self 自己 · oneAlly 一名友方 · allAllies 所有友方
+     本轮类  intentDown   该对象本轮意图值 -N
+             dmgTakenUp   该对象本轮受到的伤害 +N
+             dmgDealtDown 该对象本轮造成的伤害 -N
+             diceUp       该对象本轮拼点骰 +N
+     即时类  damage       对该对象立即造成 N 点伤害（配 onHit 可限定命中时才触发）
+             heal/temp/pressure  恢复 HP / 临时生命 / 罪孽压力
+             selfDamage / selfPressure  打出者受到 N 点伤害 / 压力 ±N（恒作用于自己，与 scope 无关）
+     本次类  thisDice / thisDamage / thisIntentDown
+             只作用于这张卡的这一次结算，投骰前就折进拼点与伤害，不留到本轮
+     胜负类  win:{...} / lose:{...}  接线卡专用，形状同 CARD_BASE_STATS
+             damage 打攻击者，heal/temp/pressure 给实际挨打的那个人
+   ※「相邻」= 战斗计算器敌人列表里的上下相邻，可在那边用 ↑↓ 调整站位。
+   ※ 七个罪孽的问答特效均已过一遍；未挂 stats 的是条件类、延时类、替换语义与【切换】类。
+   ※ stats 里带 partial:true 表示只自动了一部分，余下仍需手动。
+   ※ 带「若…」的条件类、灼烧等延时伤害、【切换】类一律不挂 stats，留给 GM。 */
 const SIN_TRAIT_QA = {
+  /* ★ 已结构化 */
   wrath:{
     attack:{
       small:[
         {question:"你的怒火从何而来？",options:[
-          {label:"愤怒",effect:"伤害 +2"},
+          {label:"愤怒",effect:"伤害 +2",stats:{thisDamage:2}},
+          // 灼烧是「本轮结束时」的延时伤害，没有回合末结算钩子，留手动
           {label:"燃烧",effect:"命中后目标在本轮结束时受到 2 点灼烧伤害"},
-          {label:"重压",effect:"本次意图值 -1"}
+          {label:"重压",effect:"本次意图值 -1",stats:{thisIntentDown:1}}
         ]},
         {question:"它让你能够____。",options:[
-          {label:"尽情释放",effect:"你的拼点骰 +1"},
-          {label:"挑战众人",effect:"命中时目标相邻的一名敌人受到 3 点伤害"},
-          {label:"破釜沉舟",effect:"你受到 2 点伤害，本次伤害 +3"}
+          {label:"尽情释放",effect:"你的拼点骰 +1",stats:{thisDice:1}},
+          {label:"挑战众人",effect:"命中时目标相邻的一名敌人受到 3 点伤害",stats:{scope:"adjOne",damage:3,onHit:true}},
+          {label:"破釜沉舟",effect:"你受到 2 点伤害，本次伤害 +3",stats:{selfDamage:2,thisDamage:3}}
         ]}
       ],
       large:[
         {question:"你的怒火从何而来？",options:[
-          {label:"愤怒",effect:"伤害 +3"},
+          {label:"愤怒",effect:"伤害 +3",stats:{thisDamage:3}},
           {label:"燃烧",effect:"命中后目标在本轮结束时受到 3 点灼烧伤害"},
+          // 条件类：要判断本轮是否已受伤
           {label:"积怨",effect:"若你本轮已受到过伤害，本次伤害 +4"}
         ]},
         {question:"它让你能够____。",options:[
-          {label:"尽情释放",effect:"你的拼点骰 +2"},
-          {label:"挑战众人",effect:"命中时所有其他敌人受到 3 点伤害"},
-          {label:"破釜沉舟",effect:"你受到 3 点伤害，你的罪孽压力 +1，本次伤害 +5"}
+          {label:"尽情释放",effect:"你的拼点骰 +2",stats:{thisDice:2}},
+          {label:"挑战众人",effect:"命中时所有其他敌人受到 3 点伤害",stats:{scope:"otherAll",damage:3,onHit:true}},
+          {label:"破釜沉舟",effect:"你受到 3 点伤害，你的罪孽压力 +1，本次伤害 +5",stats:{scope:"self",selfDamage:3,pressure:1,thisDamage:5}}
         ]},
         {question:"怒火的尽头是什么？",options:[
+          // 「本轮不能打出防御卡」没有对应的禁用机制，整条留手动
           {label:"精疲力竭",effect:"你获得 4 点临时生命，但本轮不能打出防御卡"},
           {label:"怒不可遏",effect:"若此攻击使目标 HP 降至混乱线以下，你恢复 4 HP"},
           {label:"【切换】怒焰冲天",effect:"切换到此攻击模式时，你对所有敌人造成 2 点伤害"}
@@ -287,63 +348,65 @@ const SIN_TRAIT_QA = {
     defense:{
       small:[
         {question:"你如何以怒还怒？",options:[
-          {label:"反击",effect:"防御胜利时，对攻击者造成 3 点伤害"},
-          {label:"震慑",effect:"本次意图值 -1"},
+          {label:"反击",effect:"防御胜利时，对攻击者造成 3 点伤害",stats:{win:{damage:3}}},
+          {label:"震慑",effect:"本次意图值 -1",stats:{thisIntentDown:1}},
+          // 打断意图没有对应机制，留手动
           {label:"蛮力",effect:"防御胜利时，取消攻击者本轮尚未结算的一个意图"}
         ]},
         {question:"你的防线由什么构成？",options:[
-          {label:"暴戾",effect:"你的防御拼点骰 +1"},
-          {label:"嗜血",effect:"防御胜利时你恢复 2 HP"},
-          {label:"不退半步",effect:"防御失败时你获得 5 点临时生命"}
+          {label:"暴戾",effect:"你的防御拼点骰 +1",stats:{thisDice:1}},
+          {label:"嗜血",effect:"防御胜利时你恢复 2 HP",stats:{win:{heal:2}}},
+          {label:"不退半步",effect:"防御失败时你获得 5 点临时生命",stats:{lose:{temp:5}}}
         ]}
       ],
       large:[
         {question:"你如何以怒还怒？",options:[
-          {label:"反击",effect:"防御胜利时，对攻击者造成 5 点伤害"},
-          {label:"震慑",effect:"本次意图值 -2"},
+          {label:"反击",effect:"防御胜利时，对攻击者造成 5 点伤害",stats:{win:{damage:5}}},
+          {label:"震慑",effect:"本次意图值 -2",stats:{thisIntentDown:2}},
           {label:"蛮力",effect:"防御胜利时，取消攻击者本轮尚未结算的一个意图；若其没有其他意图，改为其本轮受到的伤害 +3"}
         ]},
         {question:"你的防线由什么构成？",options:[
-          {label:"暴戾",effect:"你的防御拼点骰 +2"},
-          {label:"嗜血",effect:"防御胜利时你恢复 4 HP"},
-          {label:"不退半步",effect:"防御失败时你获得 8 点临时生命"}
+          {label:"暴戾",effect:"你的防御拼点骰 +2",stats:{thisDice:2}},
+          {label:"嗜血",effect:"防御胜利时你恢复 4 HP",stats:{win:{heal:4}}},
+          {label:"不退半步",effect:"防御失败时你获得 8 点临时生命",stats:{lose:{temp:8}}}
         ]},
         {question:"愤怒的壁垒能撑多久？",options:[
-          {label:"以攻代守",effect:"防御胜利时额外造成 2 点伤害，防御失败时仍对攻击者造成 2 点伤害"},
-          {label:"怒焰护体",effect:"防御胜利时，攻击者受到 3 点灼烧伤害"},
+          {label:"以攻代守",effect:"防御胜利时额外造成 2 点伤害，防御失败时仍对攻击者造成 2 点伤害",stats:{win:{damage:2},lose:{damage:2}}},
+          {label:"怒焰护体",effect:"防御胜利时，攻击者受到 3 点灼烧伤害",stats:{win:{damage:3}}},
           {label:"【切换】怒焰之壁",effect:"切换到此攻击模式时，对所有敌人造成 3 点伤害"}
         ]}
       ]
     }
   },
+  /* ★ 已结构化 */
   lust:{
     attack:{
       small:[
         {question:"你的攻击中蕴含什么？",options:[
-          {label:"魅力",effect:"命中后一名友方恢复 2 HP"},
-          {label:"执念",effect:"你的拼点骰 +1"},
-          {label:"诱惑",effect:"本次意图值 -1"}
+          {label:"魅力",effect:"命中后一名友方恢复 2 HP",stats:{scope:"oneAlly",heal:2,onHit:true}},
+          {label:"执念",effect:"你的拼点骰 +1",stats:{thisDice:1}},
+          {label:"诱惑",effect:"本次意图值 -1",stats:{thisIntentDown:1}}
         ]},
         {question:"你从中得到了什么？",options:[
-          {label:"满足",effect:"命中后你恢复 2 HP，你的罪孽压力 -1（最低为 0）"},
-          {label:"渴望",effect:"命中后你对同一目标立即再造成 2 点伤害"},
-          {label:"牵绊",effect:"命中后你和一名友方各恢复 1 HP"}
+          {label:"满足",effect:"命中后你恢复 2 HP，你的罪孽压力 -1（最低为 0）",stats:{scope:"self",heal:2,pressure:-1,onHit:true}},
+          {label:"渴望",effect:"命中后你对同一目标立即再造成 2 点伤害",stats:{scope:"target",damage:2,onHit:true}},
+          {label:"牵绊",effect:"命中后你和一名友方各恢复 1 HP",stats:{scope:"selfAndAlly",heal:1,onHit:true}}
         ]}
       ],
       large:[
         {question:"你的攻击中蕴含什么？",options:[
-          {label:"魅力",effect:"命中后一名友方恢复 4 HP"},
-          {label:"执念",effect:"你的拼点骰 +2"},
-          {label:"诱惑",effect:"本次意图值 -2"}
+          {label:"魅力",effect:"命中后一名友方恢复 4 HP",stats:{scope:"oneAlly",heal:4,onHit:true}},
+          {label:"执念",effect:"你的拼点骰 +2",stats:{thisDice:2}},
+          {label:"诱惑",effect:"本次意图值 -2",stats:{thisIntentDown:2}}
         ]},
         {question:"你从中得到了什么？",options:[
-          {label:"满足",effect:"命中后你恢复 4 HP，你的罪孽压力 -1（最低为 0）"},
-          {label:"渴望",effect:"命中后你对同一目标立即再造成 3 点伤害"},
-          {label:"牵绊",effect:"命中后你和所有友方各恢复 2 HP"}
+          {label:"满足",effect:"命中后你恢复 4 HP，你的罪孽压力 -1（最低为 0）",stats:{scope:"self",heal:4,pressure:-1,onHit:true}},
+          {label:"渴望",effect:"命中后你对同一目标立即再造成 3 点伤害",stats:{scope:"target",damage:3,onHit:true}},
+          {label:"牵绊",effect:"命中后你和所有友方各恢复 2 HP",stats:{scope:"allAllies",heal:2,onHit:true}}
         ]},
         {question:"欲望的终点是？",options:[
-          {label:"独占",effect:"本次伤害 +2，你对同一目标再立即造成 2 点伤害"},
-          {label:"沉溺",effect:"你获得 4 点临时生命"},
+          {label:"独占",effect:"本次伤害 +2，你对同一目标再立即造成 2 点伤害",stats:{scope:"target",thisDamage:2,damage:2}},
+          {label:"沉溺",effect:"你获得 4 点临时生命",stats:{scope:"self",temp:4}},
           {label:"【切换】欲念缠绕",effect:"切换到此攻击模式时，你恢复 3 HP，一名友方恢复 2 HP"}
         ]}
       ]
@@ -351,30 +414,32 @@ const SIN_TRAIT_QA = {
     buff:{
       small:[
         {question:"你想强化什么？",options:[
-          {label:"锋芒",effect:"你或一名友方本轮拼点骰 +2"},
-          {label:"坚韧",effect:"你或一名友方获得 3 点临时生命"},
-          {label:"敏锐",effect:"你或一名友方本轮受到的伤害 -2"}
+          {label:"锋芒",effect:"你或一名友方本轮拼点骰 +2",stats:{scope:"oneAlly",diceUp:2}},
+          {label:"坚韧",effect:"你或一名友方获得 3 点临时生命",stats:{scope:"oneAlly",temp:3}},
+          {label:"敏锐",effect:"你或一名友方本轮受到的伤害 -2",stats:{scope:"oneAlly",dmgTakenDown:2}}
         ]},
         {question:"增益的代价是什么？",options:[
+          // 「本卡所有恢复与临时生命 +1」是改写同卡其他数值的元效果，留手动
           {label:"微痛",effect:"你受到 1 点伤害，本卡的所有恢复与临时生命数值 +1"},
+          // 移除减益没有对应机制
           {label:"涤净",effect:"你或一名友方移除一个减益效果，并恢复 2 HP"},
-          {label:"依赖",effect:"你受到 1 点伤害，一名友方本轮拼点骰 +1"}
+          {label:"依赖",effect:"你受到 1 点伤害，一名友方本轮拼点骰 +1",stats:{scope:"oneAlly",selfDamage:1,diceUp:1}}
         ]}
       ],
       large:[
         {question:"你想强化什么？",options:[
-          {label:"锋芒",effect:"你或一名友方本轮拼点骰 +3"},
-          {label:"坚韧",effect:"你或一名友方获得 5 点临时生命"},
-          {label:"敏锐",effect:"你或一名友方本轮受到的伤害 -3"}
+          {label:"锋芒",effect:"你或一名友方本轮拼点骰 +3",stats:{scope:"oneAlly",diceUp:3}},
+          {label:"坚韧",effect:"你或一名友方获得 5 点临时生命",stats:{scope:"oneAlly",temp:5}},
+          {label:"敏锐",effect:"你或一名友方本轮受到的伤害 -3",stats:{scope:"oneAlly",dmgTakenDown:3}}
         ]},
         {question:"增益的代价是什么？",options:[
           {label:"微痛",effect:"你受到 2 点伤害，本卡的所有恢复与临时生命数值 +2"},
           {label:"涤净",effect:"所有友方各移除一个减益效果，你恢复 3 HP"},
-          {label:"依赖",effect:"你受到 1 点伤害，一名友方本轮拼点骰 +2"}
+          {label:"依赖",effect:"你受到 1 点伤害，一名友方本轮拼点骰 +2",stats:{scope:"oneAlly",selfDamage:1,diceUp:2}}
         ]},
         {question:"增幅的极致是？",options:[
-          {label:"共鸣",effect:"所有友方本轮拼点骰 +1"},
-          {label:"安抚",effect:"你与一名友方的罪孽压力各 -1（最低为 0），并各获得 2 点临时生命"},
+          {label:"共鸣",effect:"所有友方本轮拼点骰 +1",stats:{scope:"allAllies",diceUp:1}},
+          {label:"安抚",effect:"你与一名友方的罪孽压力各 -1（最低为 0），并各获得 2 点临时生命",stats:{scope:"selfAndAlly",pressure:-1,temp:2}},
           {label:"【切换】欲望之潮",effect:"切换到此攻击模式时，你和所有友方各恢复 2 HP"}
         ]}
       ]
@@ -386,20 +451,22 @@ const SIN_TRAIT_QA = {
     counter:{
       small:[
         {question:"你靠什么撑过这一击？",options:[
-          {label:"蓄势",effect:"你获得 4 点临时生命"},
-          {label:"龟缩",effect:"你的防御拼点骰 +2，你获得 2 点临时生命"},
+          {label:"蓄势",effect:"你获得 4 点临时生命",stats:{scope:"self",temp:4}},
+          {label:"龟缩",effect:"你的防御拼点骰 +2，你获得 2 点临时生命",stats:{scope:"self",thisDice:2,temp:2}},
+          // 「改为」是替换基础档的失败收益，不是叠加，没有替换语义，留手动
           {label:"韧壳",effect:"拼点失败时你改为获得 6 点临时生命"}
         ]},
         {question:"反击的力道从何而来？",options:[
+          // 按当前临时生命动态计算，留手动
           {label:"厚积薄发",effect:"反击伤害额外 + 你当前临时生命的一半（向下取整）"},
-          {label:"以静制动",effect:"反击伤害额外 +3；若你本轮尚未受到伤害，改为 +5"},
+          {label:"以静制动",effect:"反击伤害额外 +3；若你本轮尚未受到伤害，改为 +5",stats:{win:{damage:3},partial:true}},
           {label:"卸力反打",effect:"反击伤害额外 + 本次被格挡下来的伤害的一半（向下取整）"}
         ]}
       ],
       large:[
         {question:"你靠什么撑过这一击？",options:[
-          {label:"蓄势",effect:"你获得 6 点临时生命"},
-          {label:"龟缩",effect:"你的防御拼点骰 +3，你获得 4 点临时生命"},
+          {label:"蓄势",effect:"你获得 6 点临时生命",stats:{scope:"self",temp:6}},
+          {label:"龟缩",effect:"你的防御拼点骰 +3，你获得 4 点临时生命",stats:{scope:"self",thisDice:3,temp:4}},
           {label:"韧壳",effect:"拼点失败时你改为获得 9 点临时生命"}
         ]},
         {question:"反击的力道从何而来？",options:[
@@ -409,7 +476,7 @@ const SIN_TRAIT_QA = {
         ]},
         {question:"沉睡到最后一刻，醒来时是什么？",options:[
           {label:"【切换】倾泻",effect:"本次反击基础伤害额外 +2；结算后切换到另一组时，你本轮拼点骰 +2"},
-          {label:"溅射",effect:"与攻击者相邻的所有敌人各受到 2 点伤害"},
+          {label:"溅射",effect:"与攻击者相邻的所有敌人各受到 2 点伤害",stats:{scope:"adjAll",damage:2}},
           {label:"【切换】不死不休",effect:"拼点失败时改为对攻击者造成基础伤害的全额；若本次反击击杀攻击者，你恢复 6 HP 并获得 4 点临时生命"}
         ]}
       ]
@@ -417,63 +484,70 @@ const SIN_TRAIT_QA = {
     shield:{
       small:[
         {question:"你用什么替他挡下来？",options:[
-          {label:"厚甲",effect:"你获得 5 点临时生命"},
-          {label:"分担",effect:"被庇护的友方本轮受到的伤害 -3"},
-          {label:"垫背",effect:"被庇护的友方移除一个减益效果，并获得 3 点临时生命"}
+          {label:"厚甲",effect:"你获得 5 点临时生命",stats:{scope:"self",temp:5}},
+          {label:"分担",effect:"被庇护的友方本轮受到的伤害 -3",stats:{scope:"guarded",dmgTakenDown:3}},
+          {label:"垫背",effect:"被庇护的友方移除一个减益效果，并获得 3 点临时生命",stats:{scope:"guarded",temp:3,partial:true}}
         ]},
         {question:"挡下之后呢？",options:[
+          // 按当前临时生命动态计算，留手动
           {label:"反压",effect:"拼点胜利时，对攻击者造成等同于你当前临时生命一半的伤害（向下取整）"},
+          // 意图延后没有对应机制
           {label:"拖延",effect:"将攻击者本轮一个尚未结算的意图推迟到下一轮——它不会消失，而是叠加到其下一轮的意图上"},
-          {label:"喘息",effect:"你的援护拼点骰 +2；拼点胜利时你与被庇护的友方的罪孽压力各 -1（最低为 0）"}
+          {label:"喘息",effect:"你的援护拼点骰 +2；拼点胜利时你与被庇护的友方的罪孽压力各 -1（最低为 0）",stats:{thisDice:2,partial:true}}
         ]}
       ],
       large:[
         {question:"你用什么替他挡下来？",options:[
-          {label:"厚甲",effect:"你获得 8 点临时生命"},
-          {label:"分担",effect:"所有友方本轮受到的伤害 -3"},
-          {label:"垫背",effect:"所有友方各移除一个减益效果，你获得 4 点临时生命"}
+          {label:"厚甲",effect:"你获得 8 点临时生命",stats:{scope:"self",temp:8}},
+          {label:"分担",effect:"所有友方本轮受到的伤害 -3",stats:{scope:"allAllies",dmgTakenDown:3}},
+          {label:"垫背",effect:"所有友方各移除一个减益效果，你获得 4 点临时生命",stats:{scope:"self",temp:4,partial:true}}
         ]},
         {question:"挡下之后呢？",options:[
           {label:"反压",effect:"拼点胜利时，对攻击者造成等同于你当前临时生命的伤害"},
           {label:"拖延",effect:"将攻击者本轮所有尚未结算的意图推迟到下一轮——它们不会消失，而是叠加到其下一轮的意图上"},
-          {label:"喘息",effect:"你的援护拼点骰 +3；拼点胜利时所有友方的罪孽压力各 -1（最低为 0）"}
+          {label:"喘息",effect:"你的援护拼点骰 +3；拼点胜利时所有友方的罪孽压力各 -1（最低为 0）",stats:{thisDice:3,partial:true}}
         ]},
         {question:"把整组都押上去，换来什么？",options:[
+          // 「改为」替换基础档的每弃一张 3 点，没有替换语义，留手动
           {label:"倾覆",effect:"每弃掉一张卡片改为获得 5 点临时生命"},
-          {label:"壁垒",effect:"本轮内所有友方受到的伤害 -3"},
+          {label:"壁垒",effect:"本轮内所有友方受到的伤害 -3",stats:{scope:"allAllies",dmgTakenDown:3}},
           {label:"【切换】久眠",effect:"结算后切换到另一组时，你再获得 4 点临时生命，且下一轮你的防御与援护拼点骰 +2"}
         ]}
       ]
     }
   },
+  /* ★ 已结构化 */
   gluttony:{
     attack:{
       small:[
         {question:"你要吞噬什么？",options:[
+          // 按本次造成的伤害动态回血，留手动
           {label:"血肉",effect:"命中后你恢复等同于造成伤害一半的 HP（向下取整）"},
-          {label:"力量",effect:"本次意图值 -1"},
-          {label:"养分",effect:"你立即恢复 3 HP（无论是否命中）"}
+          {label:"力量",effect:"本次意图值 -1",stats:{thisIntentDown:1}},
+          {label:"养分",effect:"你立即恢复 3 HP（无论是否命中）",stats:{scope:"self",heal:3}}
         ]},
         {question:"你的胃口有多大？",options:[
           {label:"贪得无厌",effect:"若此攻击击杀目标，你额外恢复 5 HP"},
+          // 改写同卡其他数值的元效果，留手动
           {label:"细嚼慢咽",effect:"你本卡的所有恢复效果 +2"},
-          {label:"饥不择食",effect:"你受到 2 点伤害，本次伤害 +3"}
+          {label:"饥不择食",effect:"你受到 2 点伤害，本次伤害 +3",stats:{selfDamage:2,thisDamage:3}}
         ]}
       ],
       large:[
         {question:"你要吞噬什么？",options:[
           {label:"血肉",effect:"命中后你恢复等同于造成伤害一半的 HP（向下取整）"},
-          {label:"力量",effect:"本次意图值 -2"},
-          {label:"养分",effect:"你立即恢复 5 HP（无论是否命中）"}
+          {label:"力量",effect:"本次意图值 -2",stats:{thisIntentDown:2}},
+          {label:"养分",effect:"你立即恢复 5 HP（无论是否命中）",stats:{scope:"self",heal:5}}
         ]},
         {question:"你的胃口有多大？",options:[
           {label:"贪得无厌",effect:"若此攻击击杀目标，你额外恢复 8 HP"},
           {label:"细嚼慢咽",effect:"你本卡的所有恢复效果 +3"},
-          {label:"饥不择食",effect:"你受到 4 点伤害，你的罪孽压力 +1，本次伤害 +5"}
+          {label:"饥不择食",effect:"你受到 4 点伤害，你的罪孽压力 +1，本次伤害 +5",stats:{scope:"self",selfDamage:4,pressure:1,thisDamage:5}}
         ]},
         {question:"吞噬的尽头是？",options:[
           {label:"消化吸收",effect:"移除目标身上一个增益效果，你恢复 5 HP；若其没有增益，改为获得 5 点临时生命"},
-          {label:"吐故纳新",effect:"额外弃掉一张未使用卡片，你恢复 5 HP"},
+          // 弃牌数量要玩家挑，攻击卡没有弃牌选择步骤，留手动
+          {label:"吐故纳新",effect:"额外弃掉一张未使用卡片，你恢复 5 HP",stats:{scope:"self",heal:5,partial:true}},
           {label:"【切换】暴食之躯",effect:"切换到此攻击模式时，你恢复 3 HP，并获得 2 点临时生命"}
         ]}
       ]
@@ -481,59 +555,63 @@ const SIN_TRAIT_QA = {
     defense:{
       small:[
         {question:"你如何从防御中汲取？",options:[
-          {label:"吞噬攻击",effect:"防御胜利时你恢复 3 HP"},
-          {label:"吸收冲击",effect:"防御失败时你恢复 2 HP"},
-          {label:"储备",effect:"你获得 2 点临时生命"}
+          {label:"吞噬攻击",effect:"防御胜利时你恢复 3 HP",stats:{win:{heal:3}}},
+          {label:"吸收冲击",effect:"防御失败时你恢复 2 HP",stats:{lose:{heal:2}}},
+          {label:"储备",effect:"你获得 2 点临时生命",stats:{scope:"self",temp:2}}
         ]},
         {question:"你的壁垒靠什么维持？",options:[
-          {label:"暴食本能",effect:"你的防御拼点骰 +1，但恢复效果 -1"},
+          // 「恢复效果 -1」是改写同卡其他数值，只自动加骰部分
+          {label:"暴食本能",effect:"你的防御拼点骰 +1，但恢复效果 -1",stats:{thisDice:1,partial:true}},
           {label:"贪婪",effect:"若你当前 HP 低于一半，你的防御拼点骰 +2"},
-          {label:"索取",effect:"防御胜利时攻击者受到 2 点伤害"}
+          {label:"索取",effect:"防御胜利时攻击者受到 2 点伤害",stats:{win:{damage:2}}}
         ]}
       ],
       large:[
         {question:"你如何从防御中汲取？",options:[
-          {label:"吞噬攻击",effect:"防御胜利时你恢复 5 HP"},
-          {label:"吸收冲击",effect:"防御失败时你恢复 3 HP"},
-          {label:"储备",effect:"你获得 4 点临时生命"}
+          {label:"吞噬攻击",effect:"防御胜利时你恢复 5 HP",stats:{win:{heal:5}}},
+          {label:"吸收冲击",effect:"防御失败时你恢复 3 HP",stats:{lose:{heal:3}}},
+          {label:"储备",effect:"你获得 4 点临时生命",stats:{scope:"self",temp:4}}
         ]},
         {question:"你的壁垒靠什么维持？",options:[
-          {label:"暴食本能",effect:"你的防御拼点骰 +2，但恢复效果 -2"},
+          {label:"暴食本能",effect:"你的防御拼点骰 +2，但恢复效果 -2",stats:{thisDice:2,partial:true}},
           {label:"贪婪",effect:"若你当前 HP 低于一半，你的防御拼点骰 +3"},
-          {label:"索取",effect:"防御胜利时攻击者受到 3 点伤害"}
+          {label:"索取",effect:"防御胜利时攻击者受到 3 点伤害",stats:{win:{damage:3}}}
         ]},
         {question:"吞噬之壁的尽头是？",options:[
-          {label:"反刍",effect:"防御成功时，你对攻击者造成 3 点伤害"},
-          {label:"饱腹",effect:"防御成功时你恢复 3 HP 并获得 2 点临时生命"},
+          {label:"反刍",effect:"防御成功时，你对攻击者造成 3 点伤害",stats:{win:{damage:3}}},
+          {label:"饱腹",effect:"防御成功时你恢复 3 HP 并获得 2 点临时生命",stats:{win:{heal:3,temp:2}}},
           {label:"【切换】饥饿循环",effect:"切换到此攻击模式时，你恢复 2 HP"}
         ]}
       ]
     },
     special:{
       small:[
+        // 特殊卡的基础效果已经带弃牌步骤，这一问只是限定弃哪一类，
+        // 张数不变，所以只自动收益部分，卡种限制由玩家自己挑
         {question:"你舍弃什么来换取更多？",options:[
-          {label:"丢弃锋芒",effect:"弃掉一张攻击卡，恢复 3 HP 并获得 2 点临时生命"},
-          {label:"丢弃坚壁",effect:"弃掉一张防御 / 援护 / 反击卡，恢复 3 HP，本轮你的拼点骰 +1"},
-          {label:"丢弃积累",effect:"弃掉任意一张未使用卡片，恢复 5 HP"}
+          {label:"丢弃锋芒",effect:"弃掉一张攻击卡，恢复 3 HP 并获得 2 点临时生命",stats:{scope:"self",heal:3,temp:2,partial:true}},
+          {label:"丢弃坚壁",effect:"弃掉一张防御 / 援护 / 反击卡，恢复 3 HP，本轮你的拼点骰 +1",stats:{scope:"self",heal:3,diceUp:1,partial:true}},
+          {label:"丢弃积累",effect:"弃掉任意一张未使用卡片，恢复 5 HP",stats:{scope:"self",heal:5,partial:true}}
         ]},
         {question:"循环加速后你得到什么？",options:[
-          {label:"饥饿感",effect:"你本轮拼点骰 +1"},
-          {label:"满足感",effect:"你额外恢复 2 HP，你的罪孽压力 -1（最低为 0）"},
-          {label:"空虚感",effect:"你受到 1 点伤害，但本轮你的所有恢复效果 +2"}
+          {label:"饥饿感",effect:"你本轮拼点骰 +1",stats:{scope:"self",diceUp:1}},
+          {label:"满足感",effect:"你额外恢复 2 HP，你的罪孽压力 -1（最低为 0）",stats:{scope:"self",heal:2,pressure:-1}},
+          {label:"空虚感",effect:"你受到 1 点伤害，但本轮你的所有恢复效果 +2",stats:{selfDamage:1,partial:true}}
         ]}
       ],
       large:[
         {question:"你舍弃什么来换取更多？",options:[
-          {label:"丢弃锋芒",effect:"弃掉两张攻击卡，恢复 5 HP 并获得 4 点临时生命"},
-          {label:"丢弃坚壁",effect:"弃掉两张防御 / 援护 / 反击卡，恢复 5 HP，本轮你的拼点骰 +2"},
-          {label:"丢弃积累",effect:"弃掉两张任意未使用卡片，恢复 8 HP"}
+          {label:"丢弃锋芒",effect:"弃掉两张攻击卡，恢复 5 HP 并获得 4 点临时生命",stats:{scope:"self",heal:5,temp:4,partial:true}},
+          {label:"丢弃坚壁",effect:"弃掉两张防御 / 援护 / 反击卡，恢复 5 HP，本轮你的拼点骰 +2",stats:{scope:"self",heal:5,diceUp:2,partial:true}},
+          {label:"丢弃积累",effect:"弃掉两张任意未使用卡片，恢复 8 HP",stats:{scope:"self",heal:8,partial:true}}
         ]},
         {question:"循环加速后你得到什么？",options:[
-          {label:"饥饿感",effect:"你本轮拼点骰 +2"},
-          {label:"满足感",effect:"你额外恢复 3 HP，你的罪孽压力 -1（最低为 0）"},
-          {label:"空虚感",effect:"你受到 2 点伤害，但本轮你的所有恢复效果 +3"}
+          {label:"饥饿感",effect:"你本轮拼点骰 +2",stats:{scope:"self",diceUp:2}},
+          {label:"满足感",effect:"你额外恢复 3 HP，你的罪孽压力 -1（最低为 0）",stats:{scope:"self",heal:3,pressure:-1}},
+          {label:"空虚感",effect:"你受到 2 点伤害，但本轮你的所有恢复效果 +3",stats:{selfDamage:2,partial:true}}
         ]},
         {question:"贪婪的尽头是？",options:[
+          // 弃整组、从弃牌堆捡回，都需要额外的卡组操作，留手动
           {label:"鲸吞",effect:"弃掉当前组中所有剩余未使用卡片，你恢复等同于弃掉卡片数×2的HP，当前组立即刷新"},
           {label:"反刍",effect:"从弃掉的卡片中选择一张加入当前组（本次不消耗）"},
           {label:"【切换】饥饿吞噬",effect:"切换到此攻击模式时，你弃掉一张卡片并恢复 3 HP"}
@@ -541,75 +619,82 @@ const SIN_TRAIT_QA = {
       ]
     }
   },
+  /* ★ 已结构化 */
   gloom:{
     attack:{
       small:[
         {question:"你的痛苦如何伤害他人？",options:[
-          {label:"腐蚀",effect:"本次意图值 -1"},
+          {label:"腐蚀",effect:"本次意图值 -1",stats:{thisIntentDown:1}},
+          // 打断意图 / 禁疗都没有对应机制，留手动
           {label:"沉重",effect:"命中后取消目标本轮一个尚未结算的增益或减益意图；若其没有此类意图，改为其本轮受到的伤害 +2"},
           {label:"侵蚀",effect:"命中后目标本轮不能恢复 HP、不能获得临时生命"}
         ]},
         {question:"你付出的代价是什么？",options:[
-          {label:"自责",effect:"你受到 2 点伤害，本次伤害 +3"},
-          {label:"麻木",effect:"你的罪孽压力 +1，本次伤害 +2"},
-          {label:"承受",effect:"你本轮防御拼点骰 -2，但目标本轮所有意图值 -2"}
+          {label:"自责",effect:"你受到 2 点伤害，本次伤害 +3",stats:{selfDamage:2,thisDamage:3}},
+          {label:"麻木",effect:"你的罪孽压力 +1，本次伤害 +2",stats:{scope:"self",pressure:1,thisDamage:2}},
+          // 「防御拼点骰 -2」是本轮负增益，diceUp 填负值即可
+          {label:"承受",effect:"你本轮防御拼点骰 -2，但目标本轮所有意图值 -2",stats:{scope:"target",intentDown:2,partial:true}}
         ]}
       ],
       large:[
         {question:"你的痛苦如何伤害他人？",options:[
-          {label:"腐蚀",effect:"本次意图值 -2"},
+          {label:"腐蚀",effect:"本次意图值 -2",stats:{thisIntentDown:2}},
           {label:"沉重",effect:"命中后取消目标本轮所有尚未结算的增益与减益意图；若其没有此类意图，改为其本轮所有意图值 -2"},
-          {label:"侵蚀",effect:"命中后目标本轮不能恢复 HP、不能获得临时生命，且其所有意图值 -1"}
+          {label:"侵蚀",effect:"命中后目标本轮不能恢复 HP、不能获得临时生命，且其所有意图值 -1",stats:{scope:"target",intentDown:1,onHit:true,partial:true}}
         ]},
         {question:"你付出的代价是什么？",options:[
-          {label:"自责",effect:"你受到 3 点伤害，你的罪孽压力 +1，本次伤害 +4"},
-          {label:"麻木",effect:"你的罪孽压力 +1，本次伤害 +3"},
-          {label:"承受",effect:"你本轮防御拼点骰 -2，但目标本轮所有意图值 -3"}
+          {label:"自责",effect:"你受到 3 点伤害，你的罪孽压力 +1，本次伤害 +4",stats:{scope:"self",selfDamage:3,pressure:1,thisDamage:4}},
+          {label:"麻木",effect:"你的罪孽压力 +1，本次伤害 +3",stats:{scope:"self",pressure:1,thisDamage:3}},
+          {label:"承受",effect:"你本轮防御拼点骰 -2，但目标本轮所有意图值 -3",stats:{scope:"target",intentDown:3,partial:true}}
         ]},
         {question:"苦难的尽头是？",options:[
           {label:"共鸣",effect:"若你当前 HP 低于 50%，本次伤害 +4"},
-          {label:"绝望蔓延",effect:"与目标相邻的敌人本轮意图值各 -2，且本轮受到的伤害各 +2"},
+          {label:"绝望蔓延",effect:"与目标相邻的敌人本轮意图值各 -2，且本轮受到的伤害各 +2",stats:{scope:"adjAll",intentDown:2,dmgTakenUp:2}},
           {label:"【切换】忧郁气场",effect:"切换到此攻击模式时，所有敌人本轮意图值 -1"}
         ]}
       ]
     },
+    /* ★ 结构化样板：本特性的问答已全部挂上 stats，战斗计算器会自动结算 */
     debuff:{
       small:[
         {question:"你要夺走什么？",options:[
-          {label:"力量",effect:"目标本轮造成的伤害 -3"},
-          {label:"意志",effect:"目标本轮所有意图值额外 -1"},
+          {label:"力量",effect:"目标本轮造成的伤害 -3",stats:{scope:"target",dmgDealtDown:3}},
+          {label:"意志",effect:"目标本轮所有意图值额外 -1",stats:{scope:"target",intentDown:1}},
+          // 条件类：要先看目标有没有增益，交给 GM
           {label:"凭恃",effect:"移除目标身上一个增益效果；若其没有增益，改为其本轮受到的伤害 +2"}
         ]},
         {question:"痛苦如何扩散？",options:[
-          {label:"蔓延",effect:"与目标相邻的一名敌人本轮意图值 -1"},
-          {label:"加深",effect:"目标本轮受到的伤害 +2"},
-          {label:"自苦",effect:"你受到 2 点伤害，目标本轮意图值额外 -2"}
+          {label:"蔓延",effect:"与目标相邻的一名敌人本轮意图值 -1",stats:{scope:"adjOne",intentDown:1}},
+          {label:"加深",effect:"目标本轮受到的伤害 +2",stats:{scope:"target",dmgTakenUp:2}},
+          {label:"自苦",effect:"你受到 2 点伤害，目标本轮意图值额外 -2",stats:{scope:"target",intentDown:2,selfDamage:2}}
         ]}
       ],
       large:[
         {question:"你要夺走什么？",options:[
-          {label:"力量",effect:"目标本轮造成的伤害 -5"},
-          {label:"意志",effect:"目标本轮所有意图值额外 -2"},
+          {label:"力量",effect:"目标本轮造成的伤害 -5",stats:{scope:"target",dmgDealtDown:5}},
+          {label:"意志",effect:"目标本轮所有意图值额外 -2",stats:{scope:"target",intentDown:2}},
           {label:"凭恃",effect:"移除目标身上一个增益效果；若其没有增益，改为其本轮受到的伤害 +3"}
         ]},
         {question:"痛苦如何扩散？",options:[
-          {label:"蔓延",effect:"与目标相邻的所有敌人本轮意图值各 -1"},
-          {label:"加深",effect:"目标本轮受到的伤害 +3"},
-          {label:"自苦",effect:"你受到 3 点伤害，目标本轮意图值额外 -3"}
+          {label:"蔓延",effect:"与目标相邻的所有敌人本轮意图值各 -1",stats:{scope:"adjAll",intentDown:1}},
+          {label:"加深",effect:"目标本轮受到的伤害 +3",stats:{scope:"target",dmgTakenUp:3}},
+          {label:"自苦",effect:"你受到 3 点伤害，目标本轮意图值额外 -3",stats:{scope:"target",intentDown:3,selfDamage:3}}
         ]},
         {question:"剥夺的尽头是？",options:[
-          {label:"虚弱领域",effect:"所有敌人本轮意图值 -1"},
-          {label:"以痛止痛",effect:"你受到 2 点伤害，一名友方本轮拼点骰 +2"},
+          {label:"虚弱领域",effect:"所有敌人本轮意图值 -1",stats:{scope:"allFoes",intentDown:1}},
+          {label:"以痛止痛",effect:"你受到 2 点伤害，一名友方本轮拼点骰 +2",stats:{scope:"oneAlly",diceUp:2,selfDamage:2}},
+          // 【切换】类由切换攻击模式时触发，不在打出这张卡时结算
           {label:"【切换】绝望之影",effect:"切换到此攻击模式时，所有敌人本轮受到的伤害 +2"}
         ]}
       ]
     }
   },
+  /* ★ 已结构化 */
   pride:{
     attack:{
       small:[
         {question:"你如何证明自己？",options:[
-          {label:"精准",effect:"你的拼点骰 +1"},
+          {label:"精准",effect:"你的拼点骰 +1",stats:{thisDice:1}},
           {label:"从容",effect:"若你本轮尚未受到伤害，你的拼点骰 +2"},
           {label:"优越",effect:"若你的当前 HP 高于目标，伤害 +2"}
         ]},
@@ -621,7 +706,7 @@ const SIN_TRAIT_QA = {
       ],
       large:[
         {question:"你如何证明自己？",options:[
-          {label:"精准",effect:"你的拼点骰 +2"},
+          {label:"精准",effect:"你的拼点骰 +2",stats:{thisDice:2}},
           {label:"从容",effect:"若你本轮尚未受到伤害，你的拼点骰 +3"},
           {label:"优越",effect:"若你的当前 HP 高于目标，伤害 +3"}
         ]},
@@ -632,7 +717,7 @@ const SIN_TRAIT_QA = {
         ]},
         {question:"完美的代价是？",options:[
           {label:"不容差错",effect:"若此卡命中，本次伤害 +4；若未命中，你受到 3 点伤害且罪孽压力 +1"},
-          {label:"游刃有余",effect:"你获得 3 点临时生命"},
+          {label:"游刃有余",effect:"你获得 3 点临时生命",stats:{scope:"self",temp:3}},
           {label:"【切换】王者之姿",effect:"切换到此攻击模式时，你本轮拼点骰 +1，恢复 2 HP"}
         ]}
       ]
@@ -640,30 +725,30 @@ const SIN_TRAIT_QA = {
     defense:{
       small:[
         {question:"你如何化解攻击？",options:[
-          {label:"看穿",effect:"你的防御拼点骰 +1"},
-          {label:"以退为进",effect:"防御胜利时，你对攻击者造成 2 点伤害"},
-          {label:"偏转",effect:"防御失败时你恢复 3 HP"}
+          {label:"看穿",effect:"你的防御拼点骰 +1",stats:{thisDice:1}},
+          {label:"以退为进",effect:"防御胜利时，你对攻击者造成 2 点伤害",stats:{win:{damage:2}}},
+          {label:"偏转",effect:"防御失败时你恢复 3 HP",stats:{lose:{heal:3}}}
         ]},
         {question:"你的防线有什么特色？",options:[
-          {label:"无懈可击",effect:"本次意图值 -1"},
+          {label:"无懈可击",effect:"本次意图值 -1",stats:{thisIntentDown:1}},
           {label:"指挥若定",effect:"防御胜利时，一名友方本轮拼点骰 +1"},
           {label:"不容置疑",effect:"防御成功时，攻击者本轮不能再对你使用意图"}
         ]}
       ],
       large:[
         {question:"你如何化解攻击？",options:[
-          {label:"看穿",effect:"你的防御拼点骰 +2"},
-          {label:"以退为进",effect:"防御胜利时，你对攻击者造成 3 点伤害"},
-          {label:"偏转",effect:"防御失败时你恢复 5 HP"}
+          {label:"看穿",effect:"你的防御拼点骰 +2",stats:{thisDice:2}},
+          {label:"以退为进",effect:"防御胜利时，你对攻击者造成 3 点伤害",stats:{win:{damage:3}}},
+          {label:"偏转",effect:"防御失败时你恢复 5 HP",stats:{lose:{heal:5}}}
         ]},
         {question:"你的防线有什么特色？",options:[
-          {label:"无懈可击",effect:"本次意图值 -2"},
-          {label:"指挥若定",effect:"防御胜利时，所有友方本轮拼点骰 +1"},
+          {label:"无懈可击",effect:"本次意图值 -2",stats:{thisIntentDown:2}},
+          {label:"指挥若定",effect:"防御胜利时，所有友方本轮拼点骰 +1",stats:{scope:"allAllies",diceUp:1,partial:true}},
           {label:"游刃有余",effect:"防御成功后，你可以免费切换攻击模式并恢复 2 HP"}
         ]},
         {question:"完美的壁垒能撑多久？",options:[
           {label:"完美防御",effect:"若你的拼点值高出意图值 4 或以上，攻击者受到 3 点伤害"},
-          {label:"全盘掌控",effect:"防御成功时你获得 3 点临时生命"},
+          {label:"全盘掌控",effect:"防御成功时你获得 3 点临时生命",stats:{win:{temp:3}}},
           {label:"【切换】绝对防御",effect:"切换到此攻击模式时，你获得 4 点临时生命"}
         ]}
       ]
@@ -672,12 +757,12 @@ const SIN_TRAIT_QA = {
       large:[
         {question:"你如何展开双重打击？",options:[
           {label:"连击",effect:"两次攻击的目标可以不同"},
-          {label:"集中",effect:"两次攻击对同一目标时，第二次攻击的伤害 +2"},
+          {label:"集中",effect:"两次攻击对同一目标时，第二次攻击的伤害 +2",stats:{thisDamage:2,partial:true}},
           {label:"变招",effect:"第二次攻击改用你另一组攻击模式的拼点属性（两组模式相同时改为第二次攻击的伤害 +2）"}
         ]},
         {question:"多重攻击的节奏是？",options:[
           {label:"不懈",effect:"若第一次攻击未命中，第二次攻击的拼点骰 +2"},
-          {label:"压制",effect:"若第一次攻击命中，第二次攻击的伤害 +1"},
+          {label:"压制",effect:"若第一次攻击命中，第二次攻击的伤害 +1",stats:{thisDamage:1,partial:true}},
           {label:"灵活",effect:"你可以在第一次攻击结果出来后，再决定第二次攻击的目标"}
         ]},
         {question:"双重打击的极致是？",options:[
@@ -688,16 +773,17 @@ const SIN_TRAIT_QA = {
       ]
     }
   },
+  /* ★ 已结构化 */
   envy:{
     attack:{
       small:[
         {question:"你羡慕什么？",options:[
           {label:"力量",effect:"若目标本次用于拼点的属性值高于你，本次伤害 +3"},
-          {label:"运气",effect:"本次攻击的拼点骰 +2"},
+          {label:"运气",effect:"本次攻击的拼点骰 +2",stats:{thisDice:2}},
           {label:"拥有",effect:"若目标的当前 HP 高于你，本次伤害 +3"}
         ]},
         {question:"你会怎么做？",options:[
-          {label:"夺过来",effect:"本次意图值 -1"},
+          {label:"夺过来",effect:"本次意图值 -1",stats:{thisIntentDown:1}},
           {label:"模仿",effect:"本次攻击改用你另一组攻击模式的拼点属性（两组模式相同时改为拼点骰 +1）"},
           {label:"毁掉",effect:"命中后取消目标本轮一个尚未结算的增益或减益意图；若其没有此类意图，改为立即再造成 2 点伤害"}
         ]}
@@ -705,16 +791,16 @@ const SIN_TRAIT_QA = {
       large:[
         {question:"你羡慕什么？",options:[
           {label:"力量",effect:"若目标本次用于拼点的属性值高于你，本次伤害 +4"},
-          {label:"运气",effect:"本次攻击的拼点骰 +3"},
+          {label:"运气",effect:"本次攻击的拼点骰 +3",stats:{thisDice:3}},
           {label:"拥有",effect:"若目标的当前 HP 高于你，本次伤害 +4"}
         ]},
         {question:"你会怎么做？",options:[
-          {label:"夺过来",effect:"本次意图值 -2"},
+          {label:"夺过来",effect:"本次意图值 -2",stats:{thisIntentDown:2}},
           {label:"模仿",effect:"本次攻击改用你另一组攻击模式的拼点属性，且你的拼点骰 +1（两组模式相同时改为拼点骰 +2）"},
           {label:"毁掉",effect:"命中后取消目标本轮一个尚未结算的增益或减益意图；若其没有此类意图，改为立即再造成 3 点伤害"}
         ]},
         {question:"不甘的尽头是？",options:[
-          {label:"同归于尽",effect:"你和目标各受到 3 点伤害，你的罪孽压力 +1"},
+          {label:"同归于尽",effect:"你和目标各受到 3 点伤害，你的罪孽压力 +1",stats:{scope:"target",damage:3,selfDamage:3,selfPressure:1}},
           {label:"后来居上",effect:"若本次伤害使目标 HP 降至低于你，你恢复 3 HP"},
           {label:"【切换】不甘之眼",effect:"切换到此攻击模式时，你选择一名敌人，其本轮意图值 -1"}
         ]}
@@ -723,26 +809,26 @@ const SIN_TRAIT_QA = {
     defense:{
       small:[
         {question:"你如何模仿他人的防御？",options:[
-          {label:"借鉴",effect:"你的防御拼点骰 +1"},
-          {label:"反射",effect:"本次意图值 -3"},
-          {label:"超越",effect:"防御失败时你恢复 3 HP"}
+          {label:"借鉴",effect:"你的防御拼点骰 +1",stats:{thisDice:1}},
+          {label:"反射",effect:"本次意图值 -3",stats:{thisIntentDown:3}},
+          {label:"超越",effect:"防御失败时你恢复 3 HP",stats:{lose:{heal:3}}}
         ]},
         {question:"防御后你得到了什么？",options:[
-          {label:"经验",effect:"防御成功时你获得 2 点临时生命"},
+          {label:"经验",effect:"防御成功时你获得 2 点临时生命",stats:{win:{temp:2}}},
           {label:"见异思迁",effect:"防御成功后，你可以免费切换攻击模式"},
-          {label:"冷静",effect:"防御成功时你的罪孽压力 -1（最低为0）"}
+          {label:"冷静",effect:"防御成功时你的罪孽压力 -1（最低为0）",stats:{win:{pressure:-1}}}
         ]}
       ],
       large:[
         {question:"你如何模仿他人的防御？",options:[
-          {label:"借鉴",effect:"你的防御拼点骰 +2"},
-          {label:"反射",effect:"本次意图值 -4"},
-          {label:"超越",effect:"防御失败时你恢复 5 HP"}
+          {label:"借鉴",effect:"你的防御拼点骰 +2",stats:{thisDice:2}},
+          {label:"反射",effect:"本次意图值 -4",stats:{thisIntentDown:4}},
+          {label:"超越",effect:"防御失败时你恢复 5 HP",stats:{lose:{heal:5}}}
         ]},
         {question:"防御后你得到了什么？",options:[
-          {label:"经验",effect:"防御成功时你获得 4 点临时生命"},
-          {label:"稳固",effect:"防御成功时你恢复 3 HP"},
-          {label:"冷静",effect:"防御成功时你的罪孽压力 -1（最低为0）"}
+          {label:"经验",effect:"防御成功时你获得 4 点临时生命",stats:{win:{temp:4}}},
+          {label:"稳固",effect:"防御成功时你恢复 3 HP",stats:{win:{heal:3}}},
+          {label:"冷静",effect:"防御成功时你的罪孽压力 -1（最低为0）",stats:{win:{pressure:-1}}}
         ]},
         {question:"嫉妒之壁的尽头是？",options:[
           {label:"全盘模仿",effect:"防御成功时，你获得本次攻击者所用卡片的一条特效，本轮内有效"},
@@ -754,29 +840,29 @@ const SIN_TRAIT_QA = {
     support:{
       small:[
         {question:"你想影响什么？",options:[
-          {label:"局势",effect:"一名友方本轮拼点骰 +2"},
-          {label:"对比",effect:"一名敌人本轮意图值 -2"},
+          {label:"局势",effect:"一名友方本轮拼点骰 +2",stats:{scope:"oneAlly",diceUp:2}},
+          {label:"对比",effect:"一名敌人本轮意图值 -2",stats:{scope:"target",intentDown:2}},
           {label:"艳羡",effect:"移除一名敌人身上一个增益效果，并让一名友方获得同一效果"}
         ]},
         {question:"你的手段是什么？",options:[
-          {label:"竞争",effect:"一名友方本轮拼点骰 +1，一名敌人本轮意图值 -1"},
+          {label:"竞争",effect:"一名友方本轮拼点骰 +1，一名敌人本轮意图值 -1",stats:{scope:"target",intentDown:1,partial:true}},
           {label:"窃取",effect:"将你或一名友方身上的一个减益，转移到一名敌人身上"},
           {label:"挑拨",effect:"将一名敌人的一个攻击意图改为指向另一名敌人；场上只有一名敌人时，改为该意图的意图值 -3"}
         ]}
       ],
       large:[
         {question:"你想影响什么？",options:[
-          {label:"局势",effect:"一名友方本轮拼点骰 +3"},
-          {label:"对比",effect:"一名敌人本轮意图值 -3"},
+          {label:"局势",effect:"一名友方本轮拼点骰 +3",stats:{scope:"oneAlly",diceUp:3}},
+          {label:"对比",effect:"一名敌人本轮意图值 -3",stats:{scope:"target",intentDown:3}},
           {label:"艳羡",effect:"移除一名敌人身上一个增益效果，并让所有友方获得同一效果"}
         ]},
         {question:"你的手段是什么？",options:[
-          {label:"竞争",effect:"一名友方本轮拼点骰 +2，一名敌人本轮意图值 -2"},
+          {label:"竞争",effect:"一名友方本轮拼点骰 +2，一名敌人本轮意图值 -2",stats:{scope:"target",intentDown:2,partial:true}},
           {label:"窃取",effect:"将你与一名友方身上各一个减益，转移到一名敌人身上"},
           {label:"挑拨",effect:"将一名敌人的一个攻击意图改为指向另一名敌人，并使其意图值 -2；场上只有一名敌人时，改为该敌人按此意图对自身结算"}
         ]},
         {question:"嫉妒的尽头是？",options:[
-          {label:"公之于众",effect:"移除一名敌人身上的所有增益效果，其本轮意图值 -1"},
+          {label:"公之于众",effect:"移除一名敌人身上的所有增益效果，其本轮意图值 -1",stats:{scope:"target",intentDown:1,partial:true}},
           {label:"【切换】不甘之眼",effect:"切换到此攻击模式时，一名敌人本轮意图值 -1，一名友方本轮拼点骰 +1"},
           {label:"逆转",effect:"若场上任何敌人 HP 高于所有友方，你恢复 3 HP"}
         ]}
@@ -1194,6 +1280,8 @@ function buildCardGroupExport(gid){
     const entry=g[k]||{};
     const level=val>=3?"large":val>=2?"small":"basic";
     const effects=[];
+    // qa 与 effects[1..] 一一对应，多带一份结构化数值供战斗计算器自动结算
+    const qaPicked=[];
     if(entry.trait){
       if(level==="basic"){
         effects.push(cardBaseEffect(entry.trait,k));
@@ -1201,7 +1289,11 @@ function buildCardGroupExport(gid){
         effects.push(cardSkillBase(entry.trait,k,level));
         const qa=getSinQA(k,entry.trait,level);
         (entry.answers||[]).forEach((a,i)=>{
-          if(a!=null && qa[i]?.options?.[a]) effects.push(`${qa[i].options[a].label}——${qa[i].options[a].effect}`);
+          if(a!=null && qa[i]?.options?.[a]){
+            const o=qa[i].options[a];
+            effects.push(`${o.label}——${o.effect}`);
+            qaPicked.push({label:o.label, effect:o.effect, stats:o.stats||null});
+          }
         });
       }
     }
@@ -1218,7 +1310,9 @@ function buildCardGroupExport(gid){
                    ? (modeKey?ATTACK_MODES[modeKey].attr:null)
                  : (entry.trait==="defense"||entry.trait==="shield"||entry.trait==="counter") ? "体魄"
                  : null,
-      effects,
+      // 非攻击卡的可计算数值；攻击类为 null（它们用上面的 baseDamage / hits）
+      stats: entry.trait ? cardBaseStats(entry.trait, level) : null,
+      effects, qa: qaPicked,
       extraCard: entry.trait==="multiAttack" ? withoutClash(extraAttackCard(k, gid)) : null
     };
   }
@@ -2501,7 +2595,8 @@ function buildData(){
   ["a","b"].forEach(g=>{
     const mk=state.attackModes[g==="a"?0:1];
     modeByGroup[g.toUpperCase()+"组"]= mk
-      ? {模式:ATTACK_MODES[mk].label, 拼点属性:ATTACK_MODES[mk].attr, 副效果:ATTACK_MODES[mk].bonus}
+      ? {模式:ATTACK_MODES[mk].label, 拼点属性:ATTACK_MODES[mk].attr,
+         副效果:ATTACK_MODES[mk].bonus, 数值:ATTACK_MODES[mk].stats}
       : null;
   });
   return {

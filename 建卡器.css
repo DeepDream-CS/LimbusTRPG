@@ -303,7 +303,15 @@ button:focus-visible,.subchip:focus-visible,.rdot:focus-visible,.dot:focus-visib
 #attrEdit .stepper button{width:26px;height:26px;font-size:15px}
 
 /* ============ 战斗计算器 ============ */
-.app-wide{max-width:1360px;grid-template-columns:1fr 380px}
+/* 单栏：场上单位固定在聚光灯上方，任何宽度下都不会被挤到日志后面 */
+.app-combat{max-width:1180px;grid-template-columns:1fr}
+.board{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+.board .card{padding:18px 20px}
+@media(max-width:900px){ .board{grid-template-columns:1fr} }
+/* 战斗器没有 aside.summary，标题栏的 flex 规则要另外给 */
+.board h3.sec-head,.card h2.sec-head{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.card h2.sec-head{margin:0 0 4px}
+
 .round-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;
   border-top:1px solid var(--line);padding-top:12px}
 .round-no{font-size:16px}
@@ -317,13 +325,19 @@ button:focus-visible,.subchip:focus-visible,.rdot:focus-visible,.dot:focus-visib
 .unit-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
 .unit-head b{font-size:15px}
 .unit-tag{margin-left:auto;font-size:11px;color:var(--muted)}
-.unit-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px}
-.unit-row label{font-size:11px;color:var(--muted);display:flex;align-items:center;gap:4px}
-.unit-row input[type=number]{width:52px;background:#161923;border:1px solid var(--line);
-  color:var(--text);border-radius:6px;padding:3px 6px;font-size:13px}
-.unit-row select{background:#161923;border:1px solid var(--line);color:var(--text);
-  border-radius:6px;padding:3px 6px;font-size:12px}
-.unit-row.hint{color:var(--muted);font-size:11px}
+.unit-tag.done{color:var(--danger)}
+/* 数值区：标签在上、输入在下的等宽网格，取代原来挤成一排的裸输入框 */
+.unit-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(92px,1fr));gap:8px;margin-top:10px}
+.ustat{display:flex;flex-direction:column;gap:3px}
+.ustat>span{font-size:11px;color:var(--muted);letter-spacing:.3px}
+.ustat input,.ustat select{width:100%;background:#161923;border:1px solid var(--line);
+  color:var(--text);border-radius:6px;padding:5px 8px;font-size:13px;outline:none;transition:.15s}
+.ustat input:focus,.ustat select:focus{border-color:var(--accent)}
+.unit-foot{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap}
+.unit-deck{font-size:11px;color:var(--muted);margin-right:auto}
+.unit-foot .btn.mini{margin-left:auto}
+.unit-deck+.btn.mini{margin-left:0}
+.unit-adv{margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)}
 .name-input{flex:1;background:transparent;border:none;color:var(--text);font-size:15px;font-weight:700;
   border-bottom:1px dashed var(--line);padding:2px 0}
 .name-input:focus{outline:none;border-bottom-color:var(--accent)}
@@ -332,10 +346,20 @@ button:focus-visible,.subchip:focus-visible,.rdot:focus-visible,.dot:focus-visib
 .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--ok),#8fd39c)}
 .bar.foe i{background:linear-gradient(90deg,var(--danger),#e0837e)}
 .bar span{position:absolute;inset:0;text-align:center;font-size:11px;line-height:18px;color:var(--text)}
+.bar.mini{height:12px}
+.bar.mini span{font-size:10px;line-height:12px}
 
-.intents{display:flex;flex-direction:column;gap:5px;margin:8px 0}
-.intent{display:flex;align-items:center;gap:5px;background:#161923;border-radius:6px;padding:4px 6px;
+.intents{display:flex;flex-direction:column;gap:6px;margin:8px 0}
+.intent{display:flex;flex-direction:column;gap:4px;background:#161923;border-radius:6px;padding:6px 8px;
   border-left:3px solid var(--line)}
+.intent-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.ilab{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted)}
+.ilab select{background:#0e1016;border:1px solid var(--line);color:var(--text);
+  border-radius:5px;font-size:11px;padding:2px 4px;max-width:120px}
+/* XdY+Z 的三个小输入框贴在一起读成一个骰子表达式 */
+.ilab.dice{gap:2px}
+.iv.sm{width:38px;padding:2px 3px;font-size:12px}
+.dice-range{color:var(--muted);font-weight:400;font-size:10px;margin-left:4px;white-space:nowrap}
 .intent.i-attack{border-left-color:var(--danger)}
 .intent.i-buff{border-left-color:var(--ok)}
 .intent.i-debuff{border-left-color:#a24f9e}
@@ -346,18 +370,85 @@ button:focus-visible,.subchip:focus-visible,.rdot:focus-visible,.dot:focus-visib
 .intent .inote{flex:1;min-width:40px;background:#0e1016;border:1px solid var(--line);color:var(--text);
   border-radius:5px;padding:2px 5px;font-size:11px}
 
-.card-pick{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px}
-.pick{background:#0e1016;border:1px solid var(--line);border-radius:9px;padding:10px 12px;cursor:pointer;transition:.15s}
-.pick:hover{border-color:var(--accent)}
+/* ---- 聚光灯：四步流程条 ---- */
+.flow{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.flow-step{flex:1 1 auto;min-width:120px;display:flex;align-items:center;gap:8px;
+  font-size:13px;color:var(--muted);background:#0e1016;border:1px solid var(--line);
+  border-radius:999px;padding:7px 14px;transition:.2s}
+.flow-step b{width:20px;height:20px;flex:none;border-radius:50%;background:#232734;color:var(--muted);
+  font-size:12px;display:flex;align-items:center;justify-content:center}
+.flow-step.done{color:var(--accent-2);border-color:var(--accent)}
+.flow-step.done b{background:var(--accent);color:var(--bg)}
+.flow-step.on{color:var(--bg);background:var(--accent);border-color:var(--accent);font-weight:600}
+.flow-step.on b{background:rgba(0,0,0,.28);color:var(--bg)}
+.flow-hint{font-size:13px;color:var(--muted);margin:0 0 18px}
+
+/* ---- 聚光灯：可点选的单位/意图卡 ---- */
+.pick-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+.pick-unit{background:#0e1016;border:1px solid var(--line);border-radius:10px;padding:12px 14px;
+  cursor:pointer;transition:.15s}
+.pick-unit:hover{border-color:var(--accent);transform:translateY(-1px)}
+.pick-unit.sel{border-color:var(--accent-2);box-shadow:0 0 0 2px rgba(230,199,106,.32);
+  background:rgba(200,162,75,.08)}
+.pick-unit.done{opacity:.42;cursor:not-allowed}
+.pick-unit.done:hover{border-color:var(--line);transform:none}
+.pick-unit.narrow{min-height:0}
+.pu-head{display:flex;align-items:baseline;gap:8px;margin-bottom:8px}
+.pu-head b{font-size:15px}
+.pu-tag{margin-left:auto;font-size:11px;color:var(--muted);white-space:nowrap}
+.pu-meta{font-size:11px;color:var(--muted);margin-top:6px}
+
+/* ---- 聚光灯：分段与已选卡片 ---- */
+.spot-sec{margin-top:18px}
+.spot-sec h3{margin:0 0 10px;font-size:14px;color:var(--accent-2);font-weight:600}
+.spot-head{display:flex;align-items:flex-start;gap:12px;background:#0e1016;border:1px solid var(--line);
+  border-radius:10px;padding:12px 14px}
+.spot-sec>.spot-head{margin-bottom:10px}
+.spot-head .sh-main{flex:1;min-width:0;font-size:14px}
+.spot-head .sh-main small{display:block;color:var(--muted);font-size:12px;margin-top:3px;line-height:1.45}
+.spot-sec.chosen .spot-head{border-color:var(--accent);background:rgba(200,162,75,.07)}
+.spot-preview{background:#0e1016;border:1px solid var(--line);border-radius:10px;padding:12px 14px;
+  font-size:13px;color:var(--muted);line-height:1.6}
+.spot-preview b{color:var(--accent-2)}
+.spot-preview.note{margin-top:10px}
+.spot-preview.note b{color:var(--text)}
+.roll-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:14px}
+.btn.big{padding:13px 30px;font-size:15px}
+
+/* 无敌人时的引导块——原来只有一行灰字，玩家看不出该做什么 */
+.foe-empty{margin-top:18px;background:#0e1016;border:1px dashed var(--accent);border-radius:10px;
+  padding:22px;text-align:center}
+.foe-empty b{display:block;font-size:15px;color:var(--accent-2);margin-bottom:6px}
+.foe-empty p{margin:0 0 14px;font-size:13px;color:var(--muted)}
+
+/* 卡片角标：拼点属性 / 基础伤害 / 命中次数 */
+.ptag{display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;
+  border:1px solid var(--accent);background:rgba(200,162,75,.14);color:var(--accent-2)}
+.ptag.mute{border-color:var(--line);background:#161923;color:var(--muted)}
+.ptag.dmg{border-color:var(--ok);background:rgba(107,191,123,.14);color:var(--ok)}
+.ptag.warn{border-color:var(--danger);background:rgba(213,97,91,.14);color:var(--danger)}
+
+.card-pick{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+.pick{background:#0e1016;border:1px solid var(--line);border-radius:9px;padding:12px 14px;cursor:pointer;transition:.15s}
+.pick:hover{border-color:var(--accent);transform:translateY(-1px)}
 .pick.sel{border-color:var(--accent-2);box-shadow:0 0 0 2px rgba(230,199,106,.3)}
+/* locked = 接线卡，我方回合打不出；spent = 本轮已消耗 */
+.pick.locked,.pick.spent{opacity:.45;cursor:not-allowed}
+.pick.locked:hover,.pick.spent:hover{border-color:var(--line);transform:none}
+.pick.spent{cursor:default}
+.unit-flags{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
 .pick b{display:block;font-size:14px}
 .pick small{color:var(--muted);font-size:11px}
-.pick-eff{font-size:12px;color:var(--text);margin-top:5px;line-height:1.4}
-.gender-row .opt.done{opacity:.4}
+.pick-tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.pick-eff{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.45}
 .manual{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}
 .manual input{width:60px;background:#0e1016;border:1px solid var(--line);color:var(--text);
   border-radius:6px;padding:6px 8px}
 .logrow{background:#0e1016;border:1px solid var(--line);border-radius:8px;padding:10px 12px;
   margin-bottom:8px;font-size:13px;line-height:1.6}
 .logrow b{color:var(--accent-2)}
-@media(max-width:1100px){ .app-wide{grid-template-columns:1fr} }
+
+/* 敌人站位序号：相邻判定按这个顺序算 */
+.foe-pos{width:20px;height:20px;flex:none;display:inline-flex;align-items:center;justify-content:center;
+  border:1px solid var(--danger);border-radius:50%;color:var(--danger);font-size:11px;font-weight:700}
+.unit-tag.dead{color:var(--danger);font-weight:700}
