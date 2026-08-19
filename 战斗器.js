@@ -760,13 +760,29 @@ function spotStep() {
   const card = findCard(p, sel.cardUid);
   if (!card) return 2;
   const kind = kindOf(card);
-  if (kind === "attack") return sel.enemyId && extrasReady(card, sel) ? 4 : 3;
+  if (kind === "attack") return shotsReady(card, sel) && extrasReady(card, sel) ? 4 : 3;
   if (kind === "reaction") return sel.intentId ? 4 : 3;
   if (kind === "ally") return sel.allyId && extrasReady(card, sel) ? 4 : 3;
   if (kind === "foe") return sel.enemyId && extrasReady(card, sel) ? 4 : 3;
   const need = statsOf(card)?.discard ?? 0;
   return (sel.discard || []).length >= need ? 4 : 3;
 }
+/* 多重攻击的每一击都独立选目标与意图；单次攻击是只有一击的特例。
+   sel.shots[0] 与 sel.enemyId 保持同步，好让问答特效的 target 作用面仍指主目标。 */
+function shotsOf(card, sel) {
+  const n = card.hits || 1;
+  if (!sel.shots || sel.shots.length !== n)
+    sel.shots = Array.from({ length: n }, () => ({ enemyId: null, intentId: null }));
+  return sel.shots;
+}
+const shotsReady = (card, sel) => shotsOf(card, sel).every(s => s.enemyId);
+/* 给某一击自动挑一个还没被本卡其他击占用的待拼意图 */
+function autoIntent(enemy, shots, k) {
+  const used = shots.filter((x, i) => i !== k && x.enemyId === enemy.id).map(x => x.intentId);
+  const free = liveAttackIntents(enemy).filter(i => !used.includes(i.id));
+  return free.length ? free[0].id : null;
+}
+
 /* 需要额外指定对象才能结算的问答特效。
    增益 / 弃牌类卡的主流程不选敌人，可它们的问答可能指向敌人（如嫉妒·辅助的「对比」），
    这时也要补一个敌人选择器，否则那一条会静默落空。 */
@@ -974,67 +990,83 @@ function renderSpot() {
 /* --- 攻击卡：选敌人 → 选意图 → 投骰 --- */
 function renderAttackTarget(p, card, sel) {
   if (!state.enemies.length) return foeEmptyBlock();
-  const enemy = state.enemies.find(e => e.id === sel.enemyId);
+  const shots = shotsOf(card, sel), multi = shots.length > 1;
   const parts = clashParts(p, card), tc = thisCardMods(card);
   const mod = sumParts(parts) + tc.dice;
-
-  const foeList = `
-    <div class="spot-sec"><h3>选择目标</h3>
-      <div class="pick-row">${state.enemies.map(e => {
-        const live = liveAttackIntents(e).length;
-        return `<div class="pick-unit${sel.enemyId === e.id ? " sel" : ""}" data-foe="${e.id}">
-          <div class="pu-head"><b>${esc(e.name)}</b>
-            <span class="pu-tag">${live ? `${live} 个待拼意图` : "无待拼意图"}</span></div>
-          ${hpBar(e.hp, e.maxHp, e.temp, "foe mini")}
-        </div>`;
-      }).join("")}</div>
-      <button class="btn ghost mini" id="btnAddFoeInline">＋ 再加一个敌人</button>
-    </div>`;
-  if (!enemy) return foeList;
-
-  const intent = enemy.intents.find(i => i.id === sel.intentId) || null;
-  const live = liveAttackIntents(enemy);
-  const intentList = `
-    <div class="spot-sec">
-      <div class="spot-head"><div class="sh-main"><b>对抗哪个意图</b></div>
-        <button class="btn ghost mini" data-back="foe">← 换目标</button></div>
-      <div class="pick-row">
-        ${live.map(i => `<div class="pick-unit narrow${sel.intentId === i.id ? " sel" : ""}" data-intent="${i.id}">
-          <div class="pu-head"><b>攻击意图 ${intentValue(enemy, i)}</b></div>
-          <div class="pu-meta">${esc(i.note) || "—"}</div></div>`).join("")}
-        <div class="pick-unit narrow${sel.intentId === null ? " sel" : ""}" data-intent="none">
-          <div class="pu-head"><b>单方面攻击</b></div>
-          <div class="pu-meta">不拼点，自动命中</div></div>
-      </div>
-    </div>`;
-
   const gid = groupIdOfCard(p, card);
   const ms = p.groups[gid]?.mode?.数值 || null;
-  let preview;
   const tcTxt = [tc.dice ? `拼点骰 +${tc.dice}` : null, tc.damage ? `伤害 +${tc.damage}` : null,
     tc.intentDown ? `意图值 -${tc.intentDown}` : null].filter(Boolean).join("，");
-  if (intent) {
-    const dc = Math.max(0, intentValue(enemy, intent) - tc.intentDown);
-    preview = `拼点值 = 1D6 + ${partsText(parts)}${tc.dice ? ` 卡面+${tc.dice}` : ""} = 1D6 + ${mod} 对 意图值 ${dc}${
-        tc.intentDown ? `（原 ${intentValue(enemy, intent)}，卡面压低 ${tc.intentDown}）` : ""}
-      <br>命中率 <b>${pct(hitRate(mod, dc))}</b> · 命中时差值均值 ${avgMargin(mod, dc).toFixed(1)}
-      ${card.baseDamage != null ? `<br>命中伤害 ≈ <b>${(card.baseDamage + avgMargin(mod, dc) + tc.damage + (ms?.winDamage || 0)).toFixed(1)}</b>（基础 ${card.baseDamage} + 差值${tc.damage ? ` + 卡面${tc.damage}` : ""}${ms?.winDamage ? ` + ${p.groups[gid].mode.模式}${ms.winDamage}` : ""}）` : ""}
-      ${ms?.loseDamage ? `<br>未命中仍造成 <b>${ms.loseDamage}</b> 点（${p.groups[gid].mode.模式}模式保底）` : ""}`;
-  } else {
-    preview = `<b>单方面攻击</b>——不拼点，自动命中，<b>差值 = 拼点值</b>
-      ${card.baseDamage != null ? `<br>期望伤害 ≈ <b>${(card.baseDamage + 3.5 + mod + tc.damage).toFixed(1)}</b>` : ""}
-      ${card.hits > 1 ? `<br><span style="color:var(--danger)">注意：多重攻击的单方面那次不计差值</span>` : ""}`;
-  }
+
+  /* 每一击各自选目标与意图。多重攻击的两击是独立拼点，所以不能共用一个选择 */
+  const shotBlock = (k) => {
+    const s = shots[k];
+    const enemy = state.enemies.find(e => e.id === s.enemyId);
+    const head = multi ? `<h3>第 ${k + 1} 击 · 选择目标</h3>` : `<h3>选择目标</h3>`;
+    const foeList = `
+      <div class="spot-sec">${head}
+        <div class="pick-row">${state.enemies.map(e => {
+          const live = liveAttackIntents(e).length;
+          // 已被本卡其他击占用的意图不再算作可拼
+          const taken = shots.filter((x, i) => i !== k && x.enemyId === e.id && x.intentId).length;
+          return `<div class="pick-unit${s.enemyId === e.id ? " sel" : ""}" data-foe="${e.id}" data-shot="${k}">
+            <div class="pu-head"><b>${esc(e.name)}</b>
+              <span class="pu-tag">${live ? `${live} 个待拼意图${taken ? `（${taken} 个已被本卡占用）` : ""}` : "无待拼意图"}</span></div>
+            ${hpBar(e.hp, e.maxHp, e.temp, "foe mini")}
+          </div>`;
+        }).join("")}</div>
+        ${k === 0 ? `<button class="btn ghost mini" id="btnAddFoeInline">＋ 再加一个敌人</button>` : ""}
+      </div>`;
+    if (!enemy) return foeList;
+
+    const used = shots.filter((x, i) => i !== k && x.enemyId === enemy.id).map(x => x.intentId);
+    const live = liveAttackIntents(enemy);
+    const intentList = `
+      <div class="spot-sec">
+        <div class="spot-head"><div class="sh-main"><b>${multi ? `第 ${k + 1} 击 · ` : ""}对抗哪个意图</b></div>
+          <button class="btn ghost mini" data-back="foe" data-shot="${k}">← 换目标</button></div>
+        <div class="pick-row">
+          ${live.map(i => {
+            const dup = used.includes(i.id);
+            return `<div class="pick-unit narrow${s.intentId === i.id ? " sel" : ""}${dup ? " done" : ""}"
+                ${dup ? "" : `data-intent="${i.id}" data-shot="${k}"`}>
+              <div class="pu-head"><b>攻击意图 ${intentValue(enemy, i)}</b></div>
+              <div class="pu-meta">${dup ? "已被另一击占用" : (esc(i.note) || "—")}</div></div>`;
+          }).join("")}
+          <div class="pick-unit narrow${s.intentId === null ? " sel" : ""}" data-intent="none" data-shot="${k}">
+            <div class="pu-head"><b>单方面攻击</b></div>
+            <div class="pu-meta">不拼点，自动命中</div></div>
+        </div>
+      </div>`;
+
+    const intent = enemy.intents.find(i => i.id === s.intentId) || null;
+    let preview;
+    if (intent) {
+      const dc = Math.max(0, intentValue(enemy, intent) - tc.intentDown);
+      preview = `${multi ? `<b>第 ${k + 1} 击</b> → ${esc(enemy.name)}<br>` : ""}拼点值 = 1D6 + ${partsText(parts)}${tc.dice ? ` 卡面+${tc.dice}` : ""} = 1D6 + ${mod} 对 意图值 ${dc}${
+          tc.intentDown ? `（原 ${intentValue(enemy, intent)}，卡面压低 ${tc.intentDown}）` : ""}
+        <br>命中率 <b>${pct(hitRate(mod, dc))}</b> · 命中时差值均值 ${avgMargin(mod, dc).toFixed(1)}
+        ${card.baseDamage != null ? `<br>命中伤害 ≈ <b>${(card.baseDamage + avgMargin(mod, dc) + tc.damage + (ms?.winDamage || 0)).toFixed(1)}</b>（基础 ${card.baseDamage} + 差值${tc.damage ? ` + 卡面${tc.damage}` : ""}${ms?.winDamage ? ` + ${p.groups[gid].mode.模式}${ms.winDamage}` : ""}）` : ""}
+        ${ms?.loseDamage ? `<br>未命中仍造成 <b>${ms.loseDamage}</b> 点（${p.groups[gid].mode.模式}模式保底）` : ""}`;
+    } else {
+      preview = `${multi ? `<b>第 ${k + 1} 击</b> → ${esc(enemy.name)}<br>` : ""}<b>单方面攻击</b>——不拼点，自动命中，<b>差值 = 拼点值</b>
+        ${card.baseDamage != null ? `<br>期望伤害 ≈ <b>${multi ? (card.baseDamage + tc.damage) : (card.baseDamage + 3.5 + mod + tc.damage).toFixed(1)}</b>` : ""}
+        ${multi ? `<br><span style="color:var(--danger)">多重攻击的单方面那一击不计差值</span>` : ""}`;
+    }
+    return foeList + intentList + `<div class="spot-sec"><div class="spot-preview">${preview}</div></div>`;
+  };
+
+  const body = shots.map((_, k) => shotBlock(k)).join("");
   const extras = extraPickers(p, card, sel);   // 如「挑战众人」要另指一名相邻敌人
   const roll = `
     <div class="spot-sec">
-      <div class="spot-preview">${preview}${tcTxt ? `<br><span style="color:var(--accent-2)">卡面本次修正：${tcTxt}</span>` : ""}</div>
+      ${tcTxt ? `<div class="spot-preview"><span style="color:var(--accent-2)">卡面本次修正：${tcTxt}</span></div>` : ""}
       <div class="roll-row">
-        <button class="btn primary big" id="btnGo">🎲 投骰结算</button>
+        <button class="btn primary big" id="btnGo">🎲 ${multi ? `投骰结算（${shots.length} 击）` : "投骰结算"}</button>
         <label class="manual">手动指定骰值 <input type="number" id="manualRoll" min="1" max="6" placeholder="1-6"></label>
       </div>
     </div>`;
-  return foeList + intentList + extras + (extrasReady(card, sel) ? roll : "");
+  return body + extras + (shotsReady(card, sel) && extrasReady(card, sel) ? roll : "");
 }
 
 /* --- 接线：在自己的行动里主动接下敌方某条攻击。不占行动槽 --- */
@@ -1192,7 +1224,8 @@ function bindSpot(p, card, sel, kind) {
   $("spotBody").querySelectorAll("[data-card]").forEach(el => el.onclick = () => {
     pending = {
       playerId: p.id, slotIdx: p.slotUsed, cardUid: +el.dataset.card,
-      enemyId: null, intentId: null, allyId: null, extraFoeId: null, extraAllyId: null, discard: []
+      enemyId: null, intentId: null, shots: null, allyId: null,
+      extraFoeId: null, extraAllyId: null, discard: []
     };
     renderAll();
   });
@@ -1200,21 +1233,35 @@ function bindSpot(p, card, sel, kind) {
     const w = el.dataset.back;
     if (w === "player") { state.spot = null; pending = null; }
     else if (w === "card") pending = null;
-    else if (w === "foe" && pending) { pending.enemyId = null; pending.intentId = null; }
+    else if (w === "foe" && pending) {
+      const k = el.dataset.shot != null ? +el.dataset.shot : 0;
+      if (pending.shots?.[k]) { pending.shots[k].enemyId = null; pending.shots[k].intentId = null; }
+      if (k === 0) { pending.enemyId = null; pending.intentId = null; }
+    }
     renderAll();
   });
   if (!card) return;
   $("spotBody").querySelectorAll("[data-foe]").forEach(el => el.onclick = () => {
-    pending.enemyId = +el.dataset.foe;
-    if (kind === "attack") {
-      const e = state.enemies.find(x => x.id === pending.enemyId);
-      const live = liveAttackIntents(e);
-      pending.intentId = live.length ? live[0].id : null;
-    }
+    const id = +el.dataset.foe;
+    if (kind !== "attack") { pending.enemyId = id; renderAll(); return; }
+    const shots = shotsOf(card, pending), k = +el.dataset.shot;
+    shots[k].enemyId = id;
+    const e = state.enemies.find(x => x.id === id);
+    shots[k].intentId = autoIntent(e, shots, k);
+    // 选定第一击后，把还没指定的后续击默认放到同一个目标上（有「连击」可再改）
+    if (k === 0) shots.forEach((sh, i) => {
+      if (i > 0 && !sh.enemyId) { sh.enemyId = id; sh.intentId = autoIntent(e, shots, i); }
+    });
+    pending.enemyId = shots[0].enemyId;
+    pending.intentId = shots[0].intentId;
     renderAll();
   });
   $("spotBody").querySelectorAll("[data-intent]").forEach(el => el.onclick = () => {
-    pending.intentId = el.dataset.intent === "none" ? null : +el.dataset.intent;
+    const v = el.dataset.intent === "none" ? null : +el.dataset.intent;
+    if (kind !== "attack") { pending.intentId = v; renderAll(); return; }
+    const shots = shotsOf(card, pending);
+    shots[+el.dataset.shot].intentId = v;
+    pending.intentId = shots[0].intentId;
     renderAll();
   });
   $("spotBody").querySelectorAll("[data-icept]").forEach(el => el.onclick = () => {
@@ -1277,40 +1324,47 @@ function playCard(p, card, sel, kind) {
   }
 
   if (kind === "attack") {
-    const enemy = state.enemies.find(e => e.id === sel.enemyId);
-    const intent = enemy.intents.find(i => i.id === sel.intentId) || null;
+    const shots = shotsOf(card, sel);
     const manual = +$("manualRoll")?.value;
     const parts = clashParts(p, card), tc = thisCardMods(card);
     const mod = sumParts(parts) + tc.dice;
     const ms = g.mode?.数值 || null;
-    let total = 0, anyHit = false;
+    let anyHit = false;
+    const tally = new Map();   // 敌人 id → 本卡累计伤害，多重攻击可能打在不同目标上
     if (tc.dice || tc.damage || tc.intentDown) {
       lines.push(`卡面本次修正：${[tc.dice ? `拼点骰 +${tc.dice}` : null,
         tc.damage ? `伤害 +${tc.damage}` : null,
         tc.intentDown ? `意图值 -${tc.intentDown}` : null].filter(Boolean).join("，")}`);
     }
-    for (let h = 0; h < (card.hits || 1); h++) {
+    shots.forEach((s, h) => {
+      const enemy = state.enemies.find(e => e.id === s.enemyId);
+      if (!enemy) return;
+      // 每一击拼自己那条意图；已被结算的退化为单方面
+      const intent = enemy.intents.find(i => i.id === s.intentId && !i.resolved) || null;
       const roll = manual >= 1 && manual <= 6 ? manual : d6();
-      const useIntent = h === 0 ? intent : (intent && !intent.resolved ? intent : null);
-      const r = resolveAttack({ card, mod, modeStats: ms, enemy, intent: useIntent, roll,
+      const r = resolveAttack({ card, mod, modeStats: ms, enemy, intent, roll,
         bonusDamage: tc.damage, dcDown: tc.intentDown });
       let dmg = r.damage;
-      if (card.hits > 1 && r.oneSided) dmg = (card.baseDamage ?? 0) + tc.damage;   // 单方面不计差值
-      total += dmg;
+      if (shots.length > 1 && r.oneSided) dmg = (card.baseDamage ?? 0) + tc.damage;   // 单方面不计差值
+      tally.set(enemy.id, (tally.get(enemy.id) || 0) + dmg);
       if (r.hit) anyHit = true;
-      lines.push(`第${h + 1}击 1D6=${roll} + ${mod}(${partsText(parts)}${tc.dice ? ` 卡面+${tc.dice}` : ""}) → 拼点值 ${r.clashVal}` +
+      lines.push(`第${h + 1}击 → ${enemy.name}：1D6=${roll} + ${mod}(${partsText(parts)}${tc.dice ? ` 卡面+${tc.dice}` : ""}) → 拼点值 ${r.clashVal}` +
         (r.oneSided ? `（单方面，自动命中）` : ` 对 意图值 ${r.dc} → ${r.hit ? "命中" : "未命中"}`) +
         ` · 伤害 ${dmg}`);
-      if (useIntent) useIntent.resolved = true;
+      if (intent) intent.resolved = true;
+    });
+    for (const [eid, total] of tally) {
+      const enemy = state.enemies.find(e => e.id === eid);
+      const r = damageFoe(enemy, total);
+      lines.push(`${enemy.name} 合计承受 ${r.bonus ? `${total} + 本轮易伤 ${r.bonus} = ${r.dmg}` : r.dmg}${
+        r.absorbed ? `（临时生命吸收 ${r.absorbed}）` : ""}，剩余 ${enemy.hp}/${enemy.maxHp}`);
     }
-    const r = damageFoe(enemy, total);
-    lines.push(`合计伤害 ${r.bonus ? `${total} + 本轮易伤 ${r.bonus} = ${r.dmg}` : r.dmg}${
-      r.absorbed ? `（临时生命吸收 ${r.absorbed}）` : ""}，${enemy.name} 剩余 ${enemy.hp}/${enemy.maxHp}`);
-    title += ` 攻击 ${enemy.name}`;
+    const hitNames = [...tally.keys()].map(id => state.enemies.find(e => e.id === id)?.name).filter(Boolean);
+    title += ` 攻击 ${hitNames.join("、")}`;
     const added = card.hits > 1 ? addExtraCard(g, card) : null;
     if (added) lines.push(`※ 多重攻击：一张「${added.sinLabel} · 普通攻击」已加入 ${gid.toUpperCase()}组`);
     lines.push(...applyAllQa(card, {
-      player: p, foe: enemy,
+      player: p, foe: state.enemies.find(e => e.id === shots[0].enemyId),
       extraFoe: state.enemies.find(x => x.id === sel.extraFoeId),
       extraAlly: state.players.find(x => x.id === sel.extraAllyId)
     }, { hit: anyHit }));
