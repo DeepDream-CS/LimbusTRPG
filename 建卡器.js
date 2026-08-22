@@ -299,7 +299,11 @@ function cardSkillBase(trait, sinKey, level){
              diceUp       该对象本轮拼点骰 +N
      即时类  damage       对该对象立即造成 N 点伤害（配 onHit 可限定命中时才触发）
              heal/temp/pressure  恢复 HP / 临时生命 / 罪孽压力
-             selfDamage / selfPressure  打出者受到 N 点伤害 / 压力 ±N（恒作用于自己，与 scope 无关）
+             selfDamage / selfPressure / selfHeal / selfTemp
+                          恒作用于打出者，与 scope 无关
+             cancel:{kind,n}  打断 / 驱散：取消该对象尚未结算的意图
+                          kind = buff | debuff | any；n = 数量或 "all"
+             orElse:{...}  cancel 一个都没取到时的替代条款（对应卡面的「若其没有…改为…」）
      本次类  thisDice / thisDamage / thisIntentDown
              只作用于这张卡的这一次结算，投骰前就折进拼点与伤害，不留到本轮
      胜负类  win:{...} / lose:{...}  接线卡专用，形状同 CARD_BASE_STATS
@@ -351,7 +355,7 @@ const SIN_TRAIT_QA = {
           {label:"反击",effect:"防御胜利时，对攻击者造成 3 点伤害",stats:{win:{damage:3}}},
           {label:"震慑",effect:"本次意图值 -1",stats:{thisIntentDown:1}},
           // 打断意图没有对应机制，留手动
-          {label:"蛮力",effect:"防御胜利时，取消攻击者本轮尚未结算的一个意图"}
+          {label:"蛮力",effect:"防御胜利时，取消攻击者本轮尚未结算的一个意图",stats:{win:{cancel:{kind:"any",n:1}}}}
         ]},
         {question:"你的防线由什么构成？",options:[
           {label:"暴戾",effect:"你的防御拼点骰 +1",stats:{thisDice:1}},
@@ -363,7 +367,7 @@ const SIN_TRAIT_QA = {
         {question:"你如何以怒还怒？",options:[
           {label:"反击",effect:"防御胜利时，对攻击者造成 5 点伤害",stats:{win:{damage:5}}},
           {label:"震慑",effect:"本次意图值 -2",stats:{thisIntentDown:2}},
-          {label:"蛮力",effect:"防御胜利时，取消攻击者本轮尚未结算的一个意图；若其没有其他意图，改为其本轮受到的伤害 +3"}
+          {label:"蛮力",effect:"防御胜利时，取消攻击者本轮尚未结算的一个意图；若其没有其他意图，改为其本轮受到的伤害 +3",stats:{win:{cancel:{kind:"any",n:1},orElse:{dmgTakenUp:3}}}}
         ]},
         {question:"你的防线由什么构成？",options:[
           {label:"暴戾",effect:"你的防御拼点骰 +2",stats:{thisDice:2}},
@@ -545,7 +549,7 @@ const SIN_TRAIT_QA = {
           {label:"饥不择食",effect:"你受到 4 点伤害，你的罪孽压力 +1，本次伤害 +5",stats:{scope:"self",selfDamage:4,pressure:1,thisDamage:5}}
         ]},
         {question:"吞噬的尽头是？",options:[
-          {label:"消化吸收",effect:"移除目标身上一个增益效果，你恢复 5 HP；若其没有增益，改为获得 5 点临时生命"},
+          {label:"消化吸收",effect:"移除目标身上一个增益效果，你恢复 5 HP；若其没有增益，改为获得 5 点临时生命",stats:{scope:"target",cancel:{kind:"buff",n:1},selfHeal:5,orElse:{selfTemp:5}}},
           // 弃牌数量要玩家挑，攻击卡没有弃牌选择步骤，留手动
           {label:"吐故纳新",effect:"额外弃掉一张未使用卡片，你恢复 5 HP",stats:{scope:"self",heal:5,partial:true}},
           {label:"【切换】暴食之躯",effect:"切换到此攻击模式时，你恢复 3 HP，并获得 2 点临时生命"}
@@ -626,7 +630,7 @@ const SIN_TRAIT_QA = {
         {question:"你的痛苦如何伤害他人？",options:[
           {label:"腐蚀",effect:"本次意图值 -1",stats:{thisIntentDown:1}},
           // 打断意图 / 禁疗都没有对应机制，留手动
-          {label:"沉重",effect:"命中后取消目标本轮一个尚未结算的增益或减益意图；若其没有此类意图，改为其本轮受到的伤害 +2"},
+          {label:"沉重",effect:"命中后取消目标本轮一个尚未结算的增益或减益意图；若其没有此类意图，改为其本轮受到的伤害 +2",stats:{scope:"target",onHit:true,cancel:{kind:"any",n:1},orElse:{dmgTakenUp:2}}},
           {label:"侵蚀",effect:"命中后目标本轮不能恢复 HP、不能获得临时生命"}
         ]},
         {question:"你付出的代价是什么？",options:[
@@ -639,7 +643,7 @@ const SIN_TRAIT_QA = {
       large:[
         {question:"你的痛苦如何伤害他人？",options:[
           {label:"腐蚀",effect:"本次意图值 -2",stats:{thisIntentDown:2}},
-          {label:"沉重",effect:"命中后取消目标本轮所有尚未结算的增益与减益意图；若其没有此类意图，改为其本轮所有意图值 -2"},
+          {label:"沉重",effect:"命中后取消目标本轮所有尚未结算的增益与减益意图；若其没有此类意图，改为其本轮所有意图值 -2",stats:{scope:"target",onHit:true,cancel:{kind:"any",n:"all"},orElse:{intentDown:2}}},
           {label:"侵蚀",effect:"命中后目标本轮不能恢复 HP、不能获得临时生命，且其所有意图值 -1",stats:{scope:"target",intentDown:1,onHit:true,partial:true}}
         ]},
         {question:"你付出的代价是什么？",options:[
@@ -661,7 +665,7 @@ const SIN_TRAIT_QA = {
           {label:"力量",effect:"目标本轮造成的伤害 -3",stats:{scope:"target",dmgDealtDown:3}},
           {label:"意志",effect:"目标本轮所有意图值额外 -1",stats:{scope:"target",intentDown:1}},
           // 条件类：要先看目标有没有增益，交给 GM
-          {label:"凭恃",effect:"移除目标身上一个增益效果；若其没有增益，改为其本轮受到的伤害 +2"}
+          {label:"凭恃",effect:"移除目标身上一个增益效果；若其没有增益，改为其本轮受到的伤害 +2",stats:{scope:"target",cancel:{kind:"buff",n:1},orElse:{dmgTakenUp:2}}}
         ]},
         {question:"痛苦如何扩散？",options:[
           {label:"蔓延",effect:"与目标相邻的一名敌人本轮意图值 -1",stats:{scope:"adjOne",intentDown:1}},
@@ -673,7 +677,7 @@ const SIN_TRAIT_QA = {
         {question:"你要夺走什么？",options:[
           {label:"力量",effect:"目标本轮造成的伤害 -5",stats:{scope:"target",dmgDealtDown:5}},
           {label:"意志",effect:"目标本轮所有意图值额外 -2",stats:{scope:"target",intentDown:2}},
-          {label:"凭恃",effect:"移除目标身上一个增益效果；若其没有增益，改为其本轮受到的伤害 +3"}
+          {label:"凭恃",effect:"移除目标身上一个增益效果；若其没有增益，改为其本轮受到的伤害 +3",stats:{scope:"target",cancel:{kind:"buff",n:1},orElse:{dmgTakenUp:3}}}
         ]},
         {question:"痛苦如何扩散？",options:[
           {label:"蔓延",effect:"与目标相邻的所有敌人本轮意图值各 -1",stats:{scope:"adjAll",intentDown:1}},
@@ -785,7 +789,7 @@ const SIN_TRAIT_QA = {
         {question:"你会怎么做？",options:[
           {label:"夺过来",effect:"本次意图值 -1",stats:{thisIntentDown:1}},
           {label:"模仿",effect:"本次攻击改用你另一组攻击模式的拼点属性（两组模式相同时改为拼点骰 +1）"},
-          {label:"毁掉",effect:"命中后取消目标本轮一个尚未结算的增益或减益意图；若其没有此类意图，改为立即再造成 2 点伤害"}
+          {label:"毁掉",effect:"命中后取消目标本轮一个尚未结算的增益或减益意图；若其没有此类意图，改为立即再造成 2 点伤害",stats:{scope:"target",onHit:true,cancel:{kind:"any",n:1},orElse:{damage:2}}}
         ]}
       ],
       large:[
@@ -797,7 +801,7 @@ const SIN_TRAIT_QA = {
         {question:"你会怎么做？",options:[
           {label:"夺过来",effect:"本次意图值 -2",stats:{thisIntentDown:2}},
           {label:"模仿",effect:"本次攻击改用你另一组攻击模式的拼点属性，且你的拼点骰 +1（两组模式相同时改为拼点骰 +2）"},
-          {label:"毁掉",effect:"命中后取消目标本轮一个尚未结算的增益或减益意图；若其没有此类意图，改为立即再造成 3 点伤害"}
+          {label:"毁掉",effect:"命中后取消目标本轮一个尚未结算的增益或减益意图；若其没有此类意图，改为立即再造成 3 点伤害",stats:{scope:"target",onHit:true,cancel:{kind:"any",n:1},orElse:{damage:3}}}
         ]},
         {question:"不甘的尽头是？",options:[
           {label:"同归于尽",effect:"你和目标各受到 3 点伤害，你的罪孽压力 +1",stats:{scope:"target",damage:3,selfDamage:3,selfPressure:1}},
@@ -842,7 +846,7 @@ const SIN_TRAIT_QA = {
         {question:"你想影响什么？",options:[
           {label:"局势",effect:"一名友方本轮拼点骰 +2",stats:{scope:"oneAlly",diceUp:2}},
           {label:"对比",effect:"一名敌人本轮意图值 -2",stats:{scope:"target",intentDown:2}},
-          {label:"艳羡",effect:"移除一名敌人身上一个增益效果，并让一名友方获得同一效果"}
+          {label:"艳羡",effect:"移除一名敌人身上一个增益效果，并让一名友方获得同一效果",stats:{scope:"target",cancel:{kind:"buff",n:1},partial:true}}
         ]},
         {question:"你的手段是什么？",options:[
           {label:"竞争",effect:"一名友方本轮拼点骰 +1，一名敌人本轮意图值 -1",stats:{scope:"target",intentDown:1,partial:true}},
@@ -854,7 +858,7 @@ const SIN_TRAIT_QA = {
         {question:"你想影响什么？",options:[
           {label:"局势",effect:"一名友方本轮拼点骰 +3",stats:{scope:"oneAlly",diceUp:3}},
           {label:"对比",effect:"一名敌人本轮意图值 -3",stats:{scope:"target",intentDown:3}},
-          {label:"艳羡",effect:"移除一名敌人身上一个增益效果，并让所有友方获得同一效果"}
+          {label:"艳羡",effect:"移除一名敌人身上一个增益效果，并让所有友方获得同一效果",stats:{scope:"target",cancel:{kind:"buff",n:1},partial:true}}
         ]},
         {question:"你的手段是什么？",options:[
           {label:"竞争",effect:"一名友方本轮拼点骰 +2，一名敌人本轮意图值 -2",stats:{scope:"target",intentDown:2,partial:true}},
@@ -862,7 +866,7 @@ const SIN_TRAIT_QA = {
           {label:"挑拨",effect:"将一名敌人的一个攻击意图改为指向另一名敌人，并使其意图值 -2；场上只有一名敌人时，改为该敌人按此意图对自身结算"}
         ]},
         {question:"嫉妒的尽头是？",options:[
-          {label:"公之于众",effect:"移除一名敌人身上的所有增益效果，其本轮意图值 -1",stats:{scope:"target",intentDown:1,partial:true}},
+          {label:"公之于众",effect:"移除一名敌人身上的所有增益效果，其本轮意图值 -1",stats:{scope:"target",cancel:{kind:"buff",n:"all"},intentDown:1}},
           {label:"【切换】不甘之眼",effect:"切换到此攻击模式时，一名敌人本轮意图值 -1，一名友方本轮拼点骰 +1"},
           {label:"逆转",effect:"若场上任何敌人 HP 高于所有友方，你恢复 3 HP"}
         ]}

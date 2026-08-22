@@ -302,7 +302,29 @@ function applyQaStat(q, ctx, opts = {}) {
     if (st.temp) { u.temp = (u.temp || 0) + st.temp; lines.push(`${u.name} 获得 ${st.temp} 点临时生命`); }
     if (st.pressure) { u.pressure = Math.max(0, (u.pressure || 0) + st.pressure); lines.push(`${u.name} 罪孽压力 ${st.pressure > 0 ? "+" : ""}${st.pressure}（${u.pressure}/${u.pressureCap}）`); }
   }
-  // 自伤 / 自身压力恒落在打出者身上，与 scope 无关
+  // 打断 / 驱散：取消敌方尚未结算的增益或减益意图
+  if (st.cancel) {
+    const want = st.cancel.kind || "any";
+    let done = 0;
+    for (const u of units) {
+      if (!u.intents) continue;
+      const pool = liveOtherIntents(u).filter(i => want === "any" || i.type === want);
+      const take = st.cancel.n === "all" ? pool.length : Math.min(st.cancel.n || 1, pool.length);
+      for (let k = 0; k < take; k++) {
+        pool[k].resolved = true; done++;
+        lines.push(`取消 ${u.name} 的${INTENT_TYPES[pool[k].type].label}意图${pool[k].note ? `「${esc(pool[k].note)}」` : ""}`);
+      }
+    }
+    // 一个都没取消到 → 走替代条款
+    if (!done && st.orElse) {
+      lines.push(`没有可取消的意图，改为：`);
+      const alt = applyQaStat({ label: q.label, stats: { scope: st.scope, ...st.orElse } }, ctx, opts);
+      return lines.map(x => `  ▸ ${q.label}：${x}`).concat(alt);
+    }
+  }
+  // 自伤 / 自身收益恒落在打出者身上，与 scope 无关
+  if (st.selfHeal) lines.push(healLine(ctx.player, st.selfHeal));
+  if (st.selfTemp) { ctx.player.temp = (ctx.player.temp || 0) + st.selfTemp; lines.push(`${ctx.player.name} 获得 ${st.selfTemp} 点临时生命`); }
   if (st.selfPressure) {
     ctx.player.pressure = Math.max(0, (ctx.player.pressure || 0) + st.selfPressure);
     lines.push(`${ctx.player.name} 罪孽压力 ${st.selfPressure > 0 ? "+" : ""}${st.selfPressure}（${ctx.player.pressure}/${ctx.player.pressureCap}）`);
@@ -312,8 +334,8 @@ function applyQaStat(q, ctx, opts = {}) {
     lines.push(`${ctx.player.name} 受到 ${r.dmg} 点伤害${r.absorbed ? `（临时生命吸收 ${r.absorbed}）` : ""}，剩余 ${ctx.player.hp}/${ctx.player.maxHp}`);
   }
   // 只有「本次」类字段的条目（thisDamage 等）已在拼点里折算过，这里不该再报未结算
-  const onlyThisCard = !st.scope && !st.selfDamage && !st.selfPressure && !st.win && !st.lose;
-  if (!units.length && !st.selfDamage && !st.selfPressure && !onlyThisCard)
+  const onlyThisCard = !st.scope && !st.selfDamage && !st.selfPressure && !st.selfHeal && !st.selfTemp && !st.win && !st.lose;
+  if (!units.length && !st.selfDamage && !st.selfPressure && !st.selfHeal && !st.selfTemp && !onlyThisCard)
     lines.push(`（${SCOPE_LABEL[st.scope] || "对象"}未指定，本条未结算）`);
   return lines.map(x => `  ▸ ${q.label}：${x}`);
 }
@@ -329,6 +351,13 @@ const INTENT_TYPES = {
   debuff: { label: "减益", desc: "削弱我方——用角色的「拼点修正」手动体现" }
 };
 const liveAttackIntents = (e) => e.intents.filter(i => i.type === "attack" && !i.resolved);
+/* 增益 / 减益意图：不能拼点，但可以被「打断 / 驱散」类效果取消掉 */
+const liveOtherIntents = (e) => e.intents.filter(i => i.type !== "attack" && !i.resolved);
+const intentBrief = (e) => {
+  const b = liveOtherIntents(e).filter(i => i.type === "buff").length;
+  const d = liveOtherIntents(e).filter(i => i.type === "debuff").length;
+  return [b ? `${b} 增益` : null, d ? `${d} 减益` : null].filter(Boolean).join(" · ");
+};
 
 /* 敌方攻击的基础伤害是 XdY+Z，每次结算现掷。
    dmgN 个 dmgFaces 面骰，再加 dmgFlat 的固定值。 */
@@ -468,6 +497,15 @@ function resolveIntercept({ who, target, card, mod, enemy, intent, roll, dmgRoll
     if (qb.temp) { victim.temp = (victim.temp || 0) + qb.temp; lines.push(`  ▸ ${label}：${esc(victim.name)} 获得 ${qb.temp} 点临时生命`); }
     if (qb.heal) lines.push(`  ▸ ${label}：${healLine(victim, qb.heal)}`);
     if (qb.pressure) { victim.pressure = Math.max(0, (victim.pressure || 0) + qb.pressure); lines.push(`  ▸ ${label}：${esc(victim.name)} 罪孽压力 ${qb.pressure > 0 ? "+" : ""}${qb.pressure}`); }
+    if (qb.cancel) {
+      const pool = liveOtherIntents(enemy).filter(i => (qb.cancel.kind || "any") === "any" || i.type === qb.cancel.kind);
+      const take = qb.cancel.n === "all" ? pool.length : Math.min(qb.cancel.n || 1, pool.length);
+      for (let k = 0; k < take; k++) { pool[k].resolved = true; lines.push(`  ▸ ${label}：取消 ${esc(enemy.name)} 的${INTENT_TYPES[pool[k].type].label}意图`); }
+      if (!take && qb.orElse?.dmgTakenUp) {
+        enemy.roundDmgTaken = (enemy.roundDmgTaken || 0) + qb.orElse.dmgTakenUp;
+        lines.push(`  ▸ ${label}：没有可取消的意图，改为 ${esc(enemy.name)} 本轮受到的伤害 +${qb.orElse.dmgTakenUp}`);
+      }
+    }
   }
 
   // 【切换】结算后换到另一组
@@ -1013,6 +1051,7 @@ function renderAttackTarget(p, card, sel) {
             <div class="pu-head"><b>${esc(e.name)}</b>
               <span class="pu-tag">${live ? `${live} 个待拼意图${taken ? `（${taken} 个已被本卡占用）` : ""}` : "无待拼意图"}</span></div>
             ${hpBar(e.hp, e.maxHp, e.temp, "foe mini")}
+            ${intentBrief(e) ? `<div class="pu-meta"><span class="ptag mute">${intentBrief(e)}</span></div>` : ""}
           </div>`;
         }).join("")}</div>
         ${k === 0 ? `<button class="btn ghost mini" id="btnAddFoeInline">＋ 再加一个敌人</button>` : ""}
@@ -1159,6 +1198,7 @@ function renderFoeTarget(p, card, sel) {
           <div class="pu-head"><b>${esc(e.name)}</b>
             <span class="pu-tag">${e.roundIntentMod ? `本轮已 -${e.roundIntentMod}` : "未被削弱"}</span></div>
           ${hpBar(e.hp, e.maxHp, e.temp, "foe mini")}
+          ${intentBrief(e) ? `<div class="pu-meta"><span class="ptag mute">${intentBrief(e)}</span></div>` : ""}
         </div>`).join("")}</div>
     </div>`;
   if (!enemy) return list;
