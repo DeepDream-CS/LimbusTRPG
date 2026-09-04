@@ -306,19 +306,22 @@ function extraAttackCard(sinKey, gid){
 /* 卡面效果取值：攻击卡按罪孽查分档表，其余特性沿用通用表 */
 /* 不吃差值的罪孽，卡面就不能写「+ 差值」——文案与 stats 必须同源 */
 const dmgTail = (sinKey) => SIN_NO_MARGIN_DAMAGE[sinKey] ? "（拼点胜利即造成，不计差值）" : " + 差值";
+/* 技能卡上把这一条单独说死：括号里那半句容易被当成补充说明看过去，
+   但它决定了这张卡的全部伤害算法——问答与攻击模式的加成也只是加在基础值上。 */
+const noMarginNote = (sinKey) => SIN_NO_MARGIN_DAMAGE[sinKey]
+  ? `　※ 本卡不计差值：只要拼点胜利就造成上述伤害，赢多赢少完全一样；问答特效与攻击模式的加伤都直接加在基础伤害上，差值那一份永远拿不到。`
+  : "";
 function cardBaseEffect(trait, sinKey){
   if(trait==="attack") return `基础伤害 ${sinAttackDamage(sinKey,"basic")}${dmgTail(sinKey)}`;
   return CARD_BASE_EFFECT[trait]||"";
 }
 function cardSkillBase(trait, sinKey, level){
-  if(trait==="attack") return `基础伤害 ${sinAttackDamage(sinKey,level)}${dmgTail(sinKey)}`;
+  if(trait==="attack") return `基础伤害 ${sinAttackDamage(sinKey,level)}${dmgTail(sinKey)}${noMarginNote(sinKey)}`;
   if(trait==="multiAttack"){
-    // 只拼一次是这张卡的定价：一张牌消两条攻击意图太强，要那个必须花掉「灵活」那一格
-    return `本回合发动两次攻击，每次基础伤害 ${MULTI_ATTACK_OWN[level]}${dmgTail(sinKey)}。`
-      + `只有第一次攻击拼点；第二次不拼点、自动命中，也因此消不掉敌方的攻击意图，目标可以另选。`
-      + `（选出「灵活」后第二次也能对抗一个攻击意图。）`
-      + (SIN_NO_MARGIN_DAMAGE[sinKey] ? "" : `不拼点的那一次不计差值。`)
-      + `结算后将一张「${SIN_LABELS[sinKey]} · 普通攻击」加入本组（未使用）——本组循环因此变长`;
+    return `本回合发动两次攻击、各自独立拼点、各自选择目标与意图，每次基础伤害 ${MULTI_ATTACK_OWN[level]}${dmgTail(sinKey)}。`
+      + (SIN_NO_MARGIN_DAMAGE[sinKey] ? "" : `其中任意一次若为单方面攻击（目标没有可对抗的意图），该次不计差值。`)
+      + `结算后将一张「${SIN_LABELS[sinKey]} · 普通攻击」加入本组（未使用）——本组循环因此变长`
+      + noMarginNote(sinKey);
   }
   return CARD_SKILL_BASE[trait]?.[level]||"";
 }
@@ -757,9 +760,12 @@ const SIN_TRAIT_QA = {
     attack:{
       small:[
         {question:"你如何证明自己？",options:[
+          // 从容原本和精准同为 +2，多一个条件却不多给收益，等于永远不该选；拉开到 +4
           {label:"精准",effect:"你的拼点骰 +2",stats:{thisDice:2}},
-          {label:"从容",effect:"若你本轮尚未受到伤害，你的拼点骰 +2",stats:{cond:{selfUnhurt:true},thisDice:2}},
-          {label:"优越",effect:"若你的当前 HP 高于目标，伤害 +2",stats:{cond:{selfHpAboveFoe:true},thisDamage:2}}
+          {label:"从容",effect:"若你本轮尚未受到伤害，你的拼点骰 +4",stats:{cond:{selfUnhurt:true},thisDice:4}},
+          // 优越原本比的是「我的 HP 高于敌人」——敌人 HP 普遍远高于我方，条件几乎不成立。
+          // 改成打硬仗才生效：意图值越高越值得「证明自己」，也和这一问的主题对得上
+          {label:"优越",effect:"若目标本次的意图值高于你的拼点属性值，本次伤害 +3",stats:{cond:{intentAboveAttr:true},thisDamage:3}}
         ]},
         {question:"你的方式是什么？",options:[
           {label:"完美计算",effect:"本次拼点不投骰，骰值固定为 3",stats:{fixedRoll:3}},
@@ -773,8 +779,8 @@ const SIN_TRAIT_QA = {
       large:[
         {question:"你如何证明自己？",options:[
           {label:"精准",effect:"你的拼点骰 +3",stats:{thisDice:3}},
-          {label:"从容",effect:"若你本轮尚未受到伤害，你的拼点骰 +3",stats:{cond:{selfUnhurt:true},thisDice:3}},
-          {label:"优越",effect:"若你的当前 HP 高于目标，伤害 +3",stats:{cond:{selfHpAboveFoe:true},thisDamage:3}}
+          {label:"从容",effect:"若你本轮尚未受到伤害，你的拼点骰 +5",stats:{cond:{selfUnhurt:true},thisDice:5}},
+          {label:"优越",effect:"若目标本次的意图值高于你的拼点属性值，本次伤害 +4",stats:{cond:{intentAboveAttr:true},thisDamage:4}}
         ]},
         {question:"你的方式是什么？",options:[
           {label:"完美计算",effect:"本次拼点不投骰，骰值固定为 4",stats:{fixedRoll:4}},
@@ -827,20 +833,20 @@ const SIN_TRAIT_QA = {
         {question:"你如何展开双重打击？",options:[
           // 分目标的收益要靠「灵活」解锁第二次拼点才兑现得了，那样这一格就死绑另一题的一格了。
           // 改成加一击：收益自足，和拼不拼点无关，也不看目标怎么分
-          // excludes 指向同卡另一问的「灵活」：三击已经把伤害铺得够开，再解开第二次拼点
-          // 就成了一张牌消两条意图 + 打三段——两头都占。二选一。
-          {label:"连击",effect:"本卡改为发动三次攻击；第三次攻击的伤害 -2（同样不拼点、自动命中）",
-           excludes:[{q:1,o:2}],stats:{extraHits:1,shot:3,shotDamage:-2}},
-          {label:"集中",effect:"两次攻击对同一目标时，第二次攻击的伤害 +2",stats:{shot:2,cond:{sameTarget:true},shotDamage:2}},
-          // 第二击默认不拼点，「改用另一组的拼点属性」就落不了地——那时和两组模式相同一样走替代值
-          {label:"变招",effect:"第二次攻击改用你另一组攻击模式的拼点属性（第二次攻击不拼点、或两组模式相同时，改为其伤害 +2）",stats:{shot:2,altAttr:true,sameModeAlt:{shotDamage:2}}}
+          {label:"连击",effect:"本卡改为发动三次攻击，三次均可独立拼点；第三次攻击的伤害 -2",stats:{extraHits:1,shot:3,shotDamage:-2}},
+          // 原「集中」只给第二击加骰、还要求同目标，被无条件全击加骰的「灵活」完全盖住。
+          // 换成伤害轴：连击加击数、碾压加每击伤害、变招换属性，三条各占一个方向
+          {label:"碾压",effect:"每一次攻击的伤害 +2",stats:{thisDamage:2}},
+          {label:"变招",effect:"第二次攻击改用你另一组攻击模式的拼点属性（两组模式相同时改为第二次攻击的伤害 +2）",stats:{shot:2,altAttr:true,sameModeAlt:{shotDamage:2}}}
         ]},
         {question:"多重攻击的节奏是？",options:[
-          // 不懈与灵活同题，二选一——所以第二击带着「不懈」时必然不拼点，加骰没有意义，给伤害
-          {label:"不懈",effect:"若第一次攻击未命中，第二次攻击的伤害 +3",stats:{shot:2,cond:{firstMiss:true},shotDamage:3}},
-          {label:"压制",effect:"若第一次攻击命中，第二次攻击的伤害 +1",stats:{shot:2,cond:{firstHit:true},shotDamage:1}},
-          // 多重攻击默认只拼第一击。这条是解开第二次拼点的唯一钥匙，也是它能一张牌消两条意图的代价
-          {label:"灵活",effect:"第二次攻击也可以对抗一个攻击意图（独立拼点，可消掉第二条意图）",stats:{shot:2,canClash:true}}
+          // 原「不懈」「压制」都是挂在第二击上的条件微调（+2 骰要先打空、+1 伤几乎必然触发），
+          // 量级和同题的「灵活」差一个数量级。三条重做成三个不同的轴：团队增伤 / 条件强化 / 稳定加骰
+          {label:"威压",effect:"命中后，本卡的主目标本轮受到的伤害 +3",stats:{scope:"target",onHit:true,dmgTakenUp:3}},
+          // 与攻击卡的「从容」同向：傲慢的完美建立在毫发无伤上，条件换更高的加骰
+          {label:"无瑕",effect:"若你本轮尚未受到伤害，每一次攻击的拼点骰 +3",stats:{cond:{selfUnhurt:true},thisDice:3}},
+          // 多重攻击原来一条通用加骰都没有，所以老是拼输、白吃多段反击。thisDice 对每一击都生效
+          {label:"灵活",effect:"每一次攻击的拼点骰 +2",stats:{thisDice:2}}
         ]},
         {question:"双重打击的极致是？",options:[
           {label:"无间断",effect:"若两次攻击均命中，取消目标本轮尚未结算的所有意图",stats:{cond:{allHit:true},scope:"target",cancel:{kind:"any",n:"all"}}},
@@ -2201,6 +2207,9 @@ function renderCardOverview(body){
     <div class="attr-help" style="margin-bottom:18px">
       <b>卡片等级：</b> 排斥(0)=无卡 · 潜在(1)=基础卡片 · 显著(2)=小技能（基本功能+2条特效） · 主导(3)=大技能（基本功能+3条特效）
       <br><b>两组卡片：</b> 你选择的两种攻击模式各对应一组卡片。两组卡片构成相同，但每张卡片的特性可以分别选择。
+      <br><b>不计差值的攻击卡：</b> 卡面写「拼点胜利即造成，不计差值」的（目前是<b>傲慢</b>的攻击与多重攻击，三个等级都是），
+      伤害恒为 <b>基础伤害 + 问答加成 + 攻击模式加成</b>，拼点赢多赢少完全一样，差值那一份永远拿不到——
+      它换来的是全罪孽最强的拼点。注意只管<b>伤害</b>：傲慢·防御的「差值转临时生命」照常吃差值。
       <br><b>切换攻击模式：</b> 你同一时间只用其中一组，所有槽位都从这一组出牌，两组独立计算消耗和刷新。
       不借技能牌主动切换<b>要花掉一个行动槽</b>；卡面自带的切换（「结算后切换」「防御成功后可免费切换」）不花槽。
       <br><b>弃牌：</b> 所有弃牌一律由你从<b>本卡所在那一组的未使用卡片</b>里自选，没有随机弃牌。
@@ -2959,10 +2968,14 @@ const sinName = (k) => k?SIN_LABELS[k]:"—";
    选项字母(A/B/C)的位置未变，仅内容被替换，因此用 q/o 索引定位。
    旧存档若命中以下组合，视为引用了已废弃的选项，读档时清空该问答并提示用户重选。 */
 const DEPRECATED_OPTIONS = [
-  // 多重攻击改成「默认只拼第一击」：连击/不懈/灵活换了效果，变招的落点也从换属性变成了加伤
+  // 多重攻击重做：默认两击都拼点（回到最初），连击给第三击、灵活换成全击加骰；
+  // 集中→碾压、不懈→威压、压制→不容折辱（原来那三条都是挂在第二击上的条件微调，量级不够）。
+  // 变招也在列——它中途被改过一版措辞，答案含义跟着变过
   {sin:"pride", trait:"multiAttack", level:"large", q:0, o:0},
+  {sin:"pride", trait:"multiAttack", level:"large", q:0, o:1},
   {sin:"pride", trait:"multiAttack", level:"large", q:0, o:2},
   {sin:"pride", trait:"multiAttack", level:"large", q:1, o:0},
+  {sin:"pride", trait:"multiAttack", level:"large", q:1, o:1},
   {sin:"pride", trait:"multiAttack", level:"large", q:1, o:2},
   {sin:"wrath", trait:"attack", level:"large", q:0, o:2},
   {sin:"gloom", trait:"attack", level:"small", q:0, o:2},
@@ -2982,6 +2995,9 @@ const DEPRECATED_OPTIONS = [
   {sin:"gloom", trait:"debuff", level:"large", q:2, o:1},
   {sin:"pride", trait:"attack", level:"small", q:0, o:1},
   {sin:"pride", trait:"attack", level:"large", q:0, o:1},
+  // 从容拉高到 +4/+5（原来和精准同值、白多一个条件）；优越换掉几乎不成立的「HP 高于目标」
+  {sin:"pride", trait:"attack", level:"small", q:0, o:2},
+  {sin:"pride", trait:"attack", level:"large", q:0, o:2},
   // 「变招」原为「两次攻击可以使用不同的拼点属性」，拼点属性绑定攻击模式后改写
   {sin:"pride", trait:"multiAttack", level:"small", q:0, o:2},
   {sin:"pride", trait:"multiAttack", level:"large", q:0, o:2},

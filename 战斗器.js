@@ -403,9 +403,8 @@ function scopeTargets(st, { player, foe, extraFoe, extraAlly, guarded }) {
    它们的条件要看第一击的结果，所以每一击单独求值。 */
 function shotMods(card, n, ctx) {
   let dice = 0, damage = 0, altAttr = false;
-  const clashes = canClashShot(card, n);
-  // 「变招」换的是拼点属性：这一击不拼点（或两组模式本来就一样）时它没有落点，走 sameModeAlt
-  const useAlt = clashes && !!(ctx.player && altAttrOf(ctx.player, card));
+  // 「变招」换的是拼点属性：两组模式本来就一样时它没有落点，走 sameModeAlt 的替代值
+  const useAlt = !!(ctx.player && altAttrOf(ctx.player, card));
   for (const q of qaStats(card)) {
     let st = q.stats;
     if (st.shot !== n) continue;
@@ -414,8 +413,7 @@ function shotMods(card, n, ctx) {
     dice += st.shotDice || 0; damage += st.shotDamage || 0;
     if (st.altAttr && useAlt) altAttr = true;
   }
-  // 不拼点的那一击拿加骰没有意义，别让它出现在日志里误导人
-  return { dice: clashes ? dice : 0, damage, altAttr };
+  return { dice, damage, altAttr };
 }
 /* 「变招」「模仿」：改用另一组攻击模式的拼点属性；两组模式相同时走 sameModeAlt 的替代值 */
 function altAttrOf(p, card) {
@@ -1261,11 +1259,8 @@ function shotsOf(card, sel) {
   return sel.shots;
 }
 const shotsReady = (card, sel) => shotsOf(card, sel).every(s => s.enemyId);
-/* 多重攻击默认只有第一击拼点，后面几击是「多 A 一下」——不投骰、自动命中，
-   也因此消不掉敌方的攻击意图。一张牌消两条意图压过所有单击攻击卡，所以那是要花代价买的：
-   必须选出带 canClash 的那条问答（傲慢「灵活」）。单击攻击卡不受影响（n 恒为 1）。 */
-const canClashShot = (card, n) => n === 1 ||
-  qaStats(card).some(q => q.stats.canClash && (q.stats.shot == null || q.stats.shot === n));
+/* 多重攻击的每一击都独立拼点、各自选目标与意图——这是它的定位：
+   一张牌能消掉多条攻击意图，代价是傲慢不吃差值、还要往本组塞一张普通攻击。 */
 /* 给某一击自动挑一个还没被本卡其他击占用的待拼意图 */
 function autoIntent(enemy, shots, k) {
   const used = shots.filter((x, i) => i !== k && x.enemyId === enemy.id).map(x => x.intentId);
@@ -1592,16 +1587,7 @@ function renderAttackTarget(p, card, sel) {
 
     const used = shots.filter((x, i) => i !== k && x.enemyId === enemy.id).map(x => x.intentId);
     const live = liveAttackIntents(enemy);
-    // 这一击不拼点：连意图选择器都不该出现，免得玩家以为自己漏点了
-    const noClash = !canClashShot(card, k + 1);
-    if (noClash) s.intentId = null;
-    const intentList = noClash ? `
-      <div class="spot-sec">
-        <div class="spot-head"><div class="sh-main"><b>第 ${k + 1} 击 · 不拼点</b></div>
-          <button class="btn ghost mini" data-back="foe" data-shot="${k}">← 换目标</button></div>
-        <p class="hint">多重攻击默认只有第一击拼点，这一击直接命中，也消不掉 ${esc(enemy.name)} 的攻击意图。
-          想让它也接一条意图，得在问答里选出「灵活」。</p>
-      </div>` : `
+    const intentList = `
       <div class="spot-sec">
         <div class="spot-head"><div class="sh-main"><b>${multi ? `第 ${k + 1} 击 · ` : ""}对抗哪个意图</b></div>
           <button class="btn ghost mini" data-back="foe" data-shot="${k}">← 换目标</button></div>
@@ -1648,8 +1634,7 @@ function renderAttackTarget(p, card, sel) {
     } else {
       const nm = !!card.noMarginDamage;
       const flat = Math.max(0, card.baseDamage + tc.damage + psm.damage);
-      preview = `${multi ? `<b>第 ${k + 1} 击</b> → ${esc(enemy.name)}<br>` : ""}<b>${
-          noClash ? "不拼点（多重攻击的后续击）" : "单方面攻击"}</b>——不投骰，自动命中${
+      preview = `${multi ? `<b>第 ${k + 1} 击</b> → ${esc(enemy.name)}<br>` : ""}<b>单方面攻击</b>——不投骰，自动命中${
           nm ? "，<b>本卡不计差值</b>" : "，<b>差值 = 拼点值</b>"}
         ${card.baseDamage != null ? `<br>${nm ? "伤害 = " : "期望伤害 ≈ "}<b>${
           nm || multi ? flat : (flat + 3.5 + mod).toFixed(1)}</b>（基础 ${card.baseDamage}${
@@ -1883,12 +1868,10 @@ function bindSpot(p, card, sel, kind) {
     const shots = shotsOf(card, pending), k = +el.dataset.shot;
     shots[k].enemyId = id;
     const e = state.enemies.find(x => x.id === id);
-    // 不拼点的那几击不占意图——占了会把意图从别的击那儿抢走，还会被误判成已结算
-    const pick = (i) => canClashShot(card, i + 1) ? autoIntent(e, shots, i) : null;
-    shots[k].intentId = pick(k);
+    shots[k].intentId = autoIntent(e, shots, k);
     // 选定第一击后，把还没指定的后续击默认放到同一个目标上（想分开打再点一次即可）
     if (k === 0) shots.forEach((sh, i) => {
-      if (i > 0 && !sh.enemyId) { sh.enemyId = id; sh.intentId = pick(i); }
+      if (i > 0 && !sh.enemyId) { sh.enemyId = id; sh.intentId = autoIntent(e, shots, i); }
     });
     pending.enemyId = shots[0].enemyId;
     pending.intentId = shots[0].intentId;
@@ -2022,9 +2005,8 @@ function playCard(p, card, sel, kind) {
     shots.forEach((s, h) => {
       const enemy = state.enemies.find(e => e.id === s.enemyId);
       if (!enemy) return;
-      // 每一击拼自己那条意图；已被结算的、以及默认不拼点的后续击，都退化为单方面
-      const intent = canClashShot(card, h + 1)
-        ? (enemy.intents.find(i => i.id === s.intentId && !i.resolved) || null) : null;
+      // 每一击拼自己那条意图；已被结算的退化为单方面
+      const intent = enemy.intents.find(i => i.id === s.intentId && !i.resolved) || null;
       // fixedRoll 优先于手填与随机——「不投骰」是这条特效的全部意义
       const roll = tc.fixedRoll ?? (manual >= 1 && manual <= 6 ? manual : d6());
       // 分击修正（集中/压制/不懈/变招）只作用于第 h+1 击，条件要看第一击的结果
