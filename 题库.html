@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Limbus Company TRPG · 题库速查</title>
+<link rel="stylesheet" href="建卡器.css?v=45">
+</head>
+<body>
+<div class="app app-qa">
+  <header class="top">
+    <div class="brand">
+      <h1>Limbus Company TRPG · 题库速查</h1>
+      <div class="sub">Question Bank</div>
+      <a class="btn ghost btn-reset" href="index.html">← 返回建卡器</a>
+      <a class="btn ghost btn-reset" href="战斗器.html">⚔ 战斗计算器</a>
+      <a class="btn ghost btn-reset" href="鉴定器.html">🎲 鉴定器</a>
+    </div>
+  </header>
+
+  <main class="stage">
+    <div class="card">
+      <h2>全部罪孽卡片与问答</h2>
+      <p class="lead">七罪的卡片基础效果与技能问答一次列全，不用再一张张点进建卡器里看。
+        每个选项标注它在战斗计算器里的自动化程度——想知道「这条为什么没生效」，先看这里的标记。</p>
+      <div id="qaSummary"></div>
+      <div id="qaFilters"></div>
+    </div>
+    <div id="qaList"></div>
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+<!-- 建卡器.js 是全部规则数据的唯一来源，这里只把它当数据源引用：
+     它末尾的初始化以 #stageCard 是否存在为开关，本页没有那个元素，
+     所以只会留下数据表与纯函数，不绑事件、不读存档、不渲染向导。 -->
+<script src="建卡器.js?v=45"></script>
+<script src="题库.js?v=45"></script>
+</body>
+</html>

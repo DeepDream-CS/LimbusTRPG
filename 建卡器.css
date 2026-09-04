@@ -452,3 +452,82 @@ button:focus-visible,.subchip:focus-visible,.rdot:focus-visible,.dot:focus-visib
 .foe-pos{width:20px;height:20px;flex:none;display:inline-flex;align-items:center;justify-content:center;
   border:1px solid var(--danger);border-radius:50%;color:var(--danger);font-size:11px;font-weight:700}
 .unit-tag.dead{color:var(--danger);font-weight:700}
+
+/* 角色卡上的架势开关：免费切，供开局设定与 GM 纠正。
+   正式的「切换架势」行动在聚光灯里，要花一个行动槽。 */
+.stance-pick{display:flex;gap:6px;margin-top:8px}
+.st-btn{flex:1;min-width:0;background:#161923;border:1px solid var(--line);color:var(--muted);
+  border-radius:6px;padding:5px 6px;font-size:11px;font-family:inherit;cursor:pointer;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:.15s}
+.st-btn:hover{border-color:var(--accent);color:var(--text)}
+.st-btn.on{border-color:var(--accent);background:rgba(200,162,75,.14);color:var(--accent-2);font-weight:600;
+  cursor:default}
+
+/* ============ 题库速查（题库.html 专用） ============
+   只被 题库.html 用到，类名一律 .qa- 前缀，不与建卡器 / 鉴定器 / 战斗器 的样式相交。 */
+.app-qa{max-width:1180px;grid-template-columns:1fr}
+
+.qa-sum{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:14px 0 4px;
+  padding:12px 14px;background:#0e1016;border:1px solid var(--line);border-radius:10px}
+.qa-sum-main{font-size:13px;color:var(--muted);margin-right:auto}
+.qa-sum-main b{color:var(--accent-2);font-size:16px}
+.qa-hit{font-size:12px;color:var(--accent-2);width:100%}
+
+.qa-filters{margin-top:14px;padding-top:14px;border-top:1px dashed var(--line)}
+.qa-frow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.qa-flab{width:44px;flex:none;font-size:12px;color:var(--muted);letter-spacing:1px}
+.qa-fnote{font-size:11px;color:var(--muted)}
+.qa-chip{background:#161923;border:1px solid var(--line);color:var(--muted);border-radius:999px;
+  padding:4px 12px;font-size:12px;font-family:inherit;cursor:pointer;transition:.15s}
+.qa-chip:hover{border-color:var(--accent);color:var(--text)}
+.qa-chip.on{border-color:var(--accent);background:rgba(200,162,75,.14);color:var(--accent-2)}
+.qa-search{flex:1;min-width:180px;background:#0e1016;border:1px solid var(--line);color:var(--text);
+  border-radius:6px;padding:6px 10px;font-size:13px;font-family:inherit}
+.qa-search:focus{outline:none;border-color:var(--accent)}
+
+.qa-card{margin-top:16px;padding:16px 18px}
+.qa-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.qa-head b{font-size:15px}
+.qa-lv{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:2px 9px}
+.qa-base{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;background:#0e1016;
+  border:1px solid var(--line);border-radius:8px;padding:9px 12px;font-size:13px;line-height:1.6}
+.qa-base-lab{flex:none;font-size:11px;color:var(--accent-2);letter-spacing:1px}
+.qa-base-txt{flex:1;min-width:200px;color:var(--muted)}
+
+.qa-q{margin-top:12px}
+.qa-qt{font-size:13px;color:var(--accent-2);margin-bottom:6px}
+.qa-opt{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;padding:6px 12px;
+  border-left:2px solid var(--line);margin-bottom:4px;font-size:13px;line-height:1.6}
+.qa-opt b{flex:none;min-width:84px}
+.qa-eff{flex:1;min-width:220px;color:var(--muted)}
+
+/* 四档自动化标记，颜色与战斗器里的语义保持一致：绿=全自动、红=部分、灰=手动 */
+.qa-tag{flex:none;font-size:11px;padding:2px 8px;border-radius:999px;white-space:nowrap;
+  border:1px solid var(--line);background:#161923;color:var(--muted)}
+.qa-tag.ok{border-color:var(--ok);background:rgba(107,191,123,.14);color:var(--ok)}
+.qa-tag.warn{border-color:var(--danger);background:rgba(213,97,91,.14);color:var(--danger)}
+.qa-tag.swi{border-color:var(--accent);background:rgba(200,162,75,.14);color:var(--accent-2)}
+.qa-tag.gate{border-color:var(--accent);color:var(--accent-2);background:transparent}
+
+/* 敌人类型（杂兵/精英/BOSS）：只影响「挡下全部意图」对它生效到什么程度 */
+.kind-pick{display:flex;gap:4px;margin:6px 0 8px}
+.kd-btn{flex:1;background:#161923;border:1px solid var(--line);color:var(--muted);border-radius:6px;
+  padding:3px 6px;font-size:11px;font-family:inherit;cursor:pointer;transition:.15s}
+.kd-btn:hover{border-color:var(--danger);color:var(--text)}
+.kd-btn.on{border-color:var(--danger);background:rgba(213,97,91,.16);color:var(--danger);font-weight:600;cursor:default}
+
+/* 我方状态槽：一个个可点掉的对象，「涤净」「窃取」这类卡靠它才有东西可操作 */
+.eff-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.eff{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:2px 4px 2px 9px;
+  border-radius:999px;border:1px solid var(--line);background:#161923;color:var(--muted)}
+.eff.debuff{border-color:var(--danger);background:rgba(213,97,91,.13);color:var(--danger)}
+.eff.buff{border-color:var(--ok);background:rgba(107,191,123,.13);color:var(--ok)}
+.eff-x{background:none;border:none;color:inherit;cursor:pointer;font-size:11px;
+  padding:0 3px;opacity:.6;font-family:inherit}
+.eff-x:hover{opacity:1}
+.eff-add{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:10px;
+  padding-top:10px;border-top:1px dashed var(--line)}
+.eff-add select{background:#161923;border:1px solid var(--line);color:var(--text);
+  border-radius:5px;font-size:11px;padding:3px 5px;font-family:inherit}
+.eff-in{flex:1;min-width:90px;background:#0e1016;border:1px solid var(--line);color:var(--text);
+  border-radius:5px;padding:3px 7px;font-size:11px;font-family:inherit}

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Limbus Company TRPG · 战斗计算器</title>
-<link rel="stylesheet" href="建卡器.css?v=25">
+<link rel="stylesheet" href="建卡器.css?v=45">
 </head>
 <body>
 <div class="app app-combat">
@@ -14,6 +14,7 @@
       <div class="sub">Combat Tracker</div>
       <a class="btn ghost btn-goto" href="index.html">← 建卡器</a>
       <a class="btn ghost btn-reset" href="鉴定器.html">🎲 鉴定器</a>
+      <a class="btn ghost btn-reset" href="题库.html">📖 题库</a>
     </div>
     <div class="round-bar">
       <span class="round-no">第 <b id="roundNo">1</b> 回合</span>
@@ -41,7 +42,7 @@
     <!-- 聚光灯：出牌与接线都在这里 -->
     <div class="card" id="spotCard">
       <h2>聚光灯</h2>
-      <p class="lead">按槽位出牌。防御 / 援护 / 反击是接线卡——在自己的行动里主动打出，接下敌方某条攻击意图；不占行动槽，每轮限接一次，接的那一击也可以是打向队友的。</p>
+      <p class="lead">按槽位出牌，卡片来自当前架势那一组。防御 / 援护 / 反击是接线卡——在自己的行动里主动打出，接下敌方某条攻击意图；和攻击一样占一个行动槽，防了就不能再动，每轮限接一次，接的那一击也可以是打向队友的。不借技能牌切换架势同样占一个行动槽；开局设定架势用角色卡上的 A/B 开关，那个是免费的。</p>
       <div id="spotFlow"></div>
       <div id="spotPick"></div>
       <div id="spotBody"></div>
@@ -50,7 +51,7 @@
     <!-- 收尾：所有人行动完后，没人接下的攻击自动落地 -->
     <div class="card" id="foeCard" hidden>
       <h2>敌方攻击落地</h2>
-      <p class="lead">所有人都行动完了。以下攻击意图没人接线，逐条结算——也可以让还没接过线的人临时接下来。</p>
+      <p class="lead">所有人都行动完了。以下攻击意图没人接线，逐条结算。接线要占行动槽，必须在自己的行动里提前打出，这一步只负责让剩下的攻击落地。</p>
       <div id="foeBody"></div>
     </div>
 
@@ -70,6 +71,6 @@
 </div>
 
 <div class="toast" id="toast"></div>
-<script src="战斗器.js?v=25"></script>
+<script src="战斗器.js?v=45"></script>
 </body>
 </html>
