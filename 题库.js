@@ -45,6 +45,25 @@
     (SIN_CONDITIONAL_TRAITS[sin]?.[trait] ?? 99) <= LEVEL_VALUE[lv];
   const gateOf = (sin, trait) => SIN_CONDITIONAL_TRAITS[sin]?.[trait] ?? 0;
 
+  /* 同卡互斥（傲慢「连击」↔「灵活」）。数据里只在一边写 excludes，两边都要标出来，
+     所以在这里对称展开。建卡器有一份答案驱动的同类展开（excludedOptions），那边要的是
+     「当前已选把谁挡住了」，这边只需要静态的成对关系——声明仍然只有数据里那一处。 */
+  function exclusionMap(qa) {
+    const m = new Map();
+    const add = (qi, oi, label) => {
+      const k = `${qi}:${oi}`;
+      if (!m.has(k)) m.set(k, []);
+      m.get(k).push(label);
+    };
+    qa.forEach((q, qi) => q.options.forEach((o, oi) => (o.excludes || []).forEach(x => {
+      const other = qa[x.q]?.options?.[x.o];
+      if (!other) return;
+      add(qi, oi, other.label);
+      add(x.q, x.o, o.label);
+    })));
+    return m;
+  }
+
   /* ---------- 摊平成一维卡片列表 ---------- */
   const cards = [];
   for (const sin of SIN_ORDER) {
@@ -55,7 +74,8 @@
         const qa = getSinQA(sin, trait, lv);
         // 基础卡没有问答；若基础效果也是空的（数据里没这一档）就整块跳过
         if (!baseText && !qa.length) continue;
-        cards.push({ sin, trait, lv, baseText, baseStats: cardBaseStats(trait, lv), qa });
+        cards.push({ sin, trait, lv, baseText, baseStats: cardBaseStats(trait, lv), qa,
+                     ex: exclusionMap(qa) });
       }
     }
   }
@@ -120,11 +140,13 @@
       ${c.qa.map((q, qi) => `
         <div class="qa-q">
           <div class="qa-qt">${qi + 1}. ${esc(q.question)}</div>
-          ${q.options.map(o => {
+          ${q.options.map((o, oi) => {
             const k = autoKindOf(o);
+            const ex = c.ex.get(`${qi}:${oi}`) || [];
             return `<div class="qa-opt" data-auto="${k}">
               <b>${esc(o.label)}</b>
               <span class="qa-eff">${esc(o.effect)}</span>
+              ${ex.length ? `<span class="qa-tag gate">与「${ex.map(esc).join("」「")}」互斥</span>` : ""}
               <span class="qa-tag ${AUTO[k].cls}">${AUTO[k].label}</span>
             </div>`;
           }).join("")}

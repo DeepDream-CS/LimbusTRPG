@@ -265,6 +265,10 @@ button:focus-visible,.subchip:focus-visible,.rdot:focus-visible,.dot:focus-visib
 .qa-opt-label{font-weight:600;color:var(--text);margin-bottom:4px}
 .qa-opt-effect{font-size:13px;color:var(--muted)}
 .qa-option.sel .qa-opt-label{color:var(--accent-2)}
+/* 被同卡另一问的选择挡住的选项：还看得见（要知道自己放弃了什么），但点不动 */
+.qa-option.locked{opacity:.42;cursor:not-allowed;background:#0b0c10}
+.qa-option.locked:hover{border-color:var(--line)}
+.qa-opt-lock{margin-top:6px;font-size:12px;color:var(--danger)}
 
 /* ============ 卡片预览 ============ */
 .preview-cards{display:flex;flex-direction:column;gap:12px}

@@ -403,13 +403,19 @@ function scopeTargets(st, { player, foe, extraFoe, extraAlly, guarded }) {
    它们的条件要看第一击的结果，所以每一击单独求值。 */
 function shotMods(card, n, ctx) {
   let dice = 0, damage = 0, altAttr = false;
+  const clashes = canClashShot(card, n);
+  // 「变招」换的是拼点属性：这一击不拼点（或两组模式本来就一样）时它没有落点，走 sameModeAlt
+  const useAlt = clashes && !!(ctx.player && altAttrOf(ctx.player, card));
   for (const q of qaStats(card)) {
-    const st = q.stats;
-    if (st.shot !== n || !condMet(st.cond, ctx)) continue;
+    let st = q.stats;
+    if (st.shot !== n) continue;
+    if (st.sameModeAlt && !useAlt) st = { ...st, ...st.sameModeAlt };
+    if (!condMet(st.cond, ctx)) continue;
     dice += st.shotDice || 0; damage += st.shotDamage || 0;
-    if (st.altAttr) altAttr = true;
+    if (st.altAttr && useAlt) altAttr = true;
   }
-  return { dice, damage, altAttr };
+  // 不拼点的那一击拿加骰没有意义，别让它出现在日志里误导人
+  return { dice: clashes ? dice : 0, damage, altAttr };
 }
 /* 「变招」「模仿」：改用另一组攻击模式的拼点属性；两组模式相同时走 sameModeAlt 的替代值 */
 function altAttrOf(p, card) {
@@ -705,7 +711,7 @@ function resolveAttack({ card, mod, modeStats, enemy, intent, roll, bonusDamage 
     // 单方面：自动命中，差值 = 拼点值（不吃差值的卡同样拿不到这一份）
     const clashVal = roll + mod;
     return { oneSided: true, hit: true, roll, clashVal, dc: null, margin: noMargin ? 0 : clashVal,
-             damage: base + (noMargin ? 0 : clashVal) + bonusDamage };
+             damage: Math.max(0, base + (noMargin ? 0 : clashVal) + bonusDamage) };
   }
   const dc = Math.max(0, intentValue(enemy, intent) - dcDown);
   const clashVal = roll + mod;
@@ -715,7 +721,8 @@ function resolveAttack({ card, mod, modeStats, enemy, intent, roll, bonusDamage 
   // 攻击模式副效果：打击胜利加伤，突刺失败保底
   if (hit && modeStats?.winDamage) damage += modeStats.winDamage;
   if (!hit && modeStats?.loseDamage) damage = modeStats.loseDamage;
-  return { oneSided: false, hit, roll, clashVal, dc, margin, damage };
+  // 分击修正可以是负的（「连击」第三击 -2），别让它把伤害压到负数去
+  return { oneSided: false, hit, roll, clashVal, dc, margin, damage: Math.max(0, damage) };
 }
 
 /* 差值转临时生命。与攻击的「差值→伤害」同构——防得越漂亮壳越厚，
@@ -1244,13 +1251,21 @@ function spotStep() {
 }
 /* 多重攻击的每一击都独立选目标与意图；单次攻击是只有一击的特例。
    sel.shots[0] 与 sel.enemyId 保持同步，好让问答特效的 target 作用面仍指主目标。 */
+/* 问答加的击数（傲慢「连击」）。card.hits 是卡片级导出，加击是问答级的，两者相加才是真正打几下 */
+const extraHitsOf = (card) => (card.qa || [])
+  .reduce((a, q) => a + ((q.stats && !q.onSwitchIn && q.stats.extraHits) || 0), 0);
 function shotsOf(card, sel) {
-  const n = card.hits || 1;
+  const n = (card.hits || 1) + (card.hits > 1 ? extraHitsOf(card) : 0);
   if (!sel.shots || sel.shots.length !== n)
     sel.shots = Array.from({ length: n }, () => ({ enemyId: null, intentId: null }));
   return sel.shots;
 }
 const shotsReady = (card, sel) => shotsOf(card, sel).every(s => s.enemyId);
+/* 多重攻击默认只有第一击拼点，后面几击是「多 A 一下」——不投骰、自动命中，
+   也因此消不掉敌方的攻击意图。一张牌消两条意图压过所有单击攻击卡，所以那是要花代价买的：
+   必须选出带 canClash 的那条问答（傲慢「灵活」）。单击攻击卡不受影响（n 恒为 1）。 */
+const canClashShot = (card, n) => n === 1 ||
+  qaStats(card).some(q => q.stats.canClash && (q.stats.shot == null || q.stats.shot === n));
 /* 给某一击自动挑一个还没被本卡其他击占用的待拼意图 */
 function autoIntent(enemy, shots, k) {
   const used = shots.filter((x, i) => i !== k && x.enemyId === enemy.id).map(x => x.intentId);
@@ -1577,7 +1592,16 @@ function renderAttackTarget(p, card, sel) {
 
     const used = shots.filter((x, i) => i !== k && x.enemyId === enemy.id).map(x => x.intentId);
     const live = liveAttackIntents(enemy);
-    const intentList = `
+    // 这一击不拼点：连意图选择器都不该出现，免得玩家以为自己漏点了
+    const noClash = !canClashShot(card, k + 1);
+    if (noClash) s.intentId = null;
+    const intentList = noClash ? `
+      <div class="spot-sec">
+        <div class="spot-head"><div class="sh-main"><b>第 ${k + 1} 击 · 不拼点</b></div>
+          <button class="btn ghost mini" data-back="foe" data-shot="${k}">← 换目标</button></div>
+        <p class="hint">多重攻击默认只有第一击拼点，这一击直接命中，也消不掉 ${esc(enemy.name)} 的攻击意图。
+          想让它也接一条意图，得在问答里选出「灵活」。</p>
+      </div>` : `
       <div class="spot-sec">
         <div class="spot-head"><div class="sh-main"><b>${multi ? `第 ${k + 1} 击 · ` : ""}对抗哪个意图</b></div>
           <button class="btn ghost mini" data-back="foe" data-shot="${k}">← 换目标</button></div>
@@ -1596,6 +1620,13 @@ function renderAttackTarget(p, card, sel) {
       </div>`;
 
     const intent = enemy.intents.find(i => i.id === s.intentId) || null;
+    /* 分击加伤（连击 / 集中 / 变招）预览：目标已经选完，sameTarget 现在就能判。
+       看第一击结果的那两条（压制 / 不懈）拿不到上下文，condMet 一律返回 false，预览里不出现——
+       宁可少报，也不写一个投完骰会变的数。 */
+    const psm = multi ? shotMods(card, k + 1, { player: p, foe: enemy,
+      sameTarget: shots.every(x => x.enemyId && x.enemyId === shots[0].enemyId) }) : { dice: 0, damage: 0 };
+    // 分击修正可正可负（「连击」第三击 -2），符号要跟着走
+    const smTxt = psm.damage ? ` ${psm.damage > 0 ? "+" : "−"} 分击${Math.abs(psm.damage)}` : "";
     let preview;
     if (intent) {
       const dc = Math.max(0, intentValue(enemy, intent) - tc.intentDown);
@@ -1612,16 +1643,18 @@ function renderAttackTarget(p, card, sel) {
           tc.intentDown ? `（原 ${intentValue(enemy, intent)}，卡面压低 ${tc.intentDown}）` : ""}
         <br>${fx ? `<b>${fxHit ? "必定命中" : "必定未命中"}</b>${nm ? "" : ` · 差值 ${fxMargin}`}`
                  : `命中率 <b>${pct(hitRate(mod, dc))}</b>${nm ? "" : ` · 命中时差值均值 ${avgMargin(mod, dc).toFixed(1)}`}`}
-        ${card.baseDamage != null ? `<br>命中伤害 ${fx || nm ? "=" : "≈"} <b>${(card.baseDamage + avgM + tc.damage + (ms?.winDamage || 0)).toFixed(fx || nm ? 0 : 1)}</b>（基础 ${card.baseDamage}${nm ? "" : " + 差值"}${tc.damage ? ` + 卡面${tc.damage}` : ""}${ms?.winDamage ? ` + ${p.groups[gid].mode.模式}${ms.winDamage}` : ""}${nm ? "，本卡不计差值" : ""}）` : ""}
+        ${card.baseDamage != null ? `<br>命中伤害 ${fx || nm ? "=" : "≈"} <b>${(card.baseDamage + avgM + tc.damage + psm.damage + (ms?.winDamage || 0)).toFixed(fx || nm ? 0 : 1)}</b>（基础 ${card.baseDamage}${nm ? "" : " + 差值"}${tc.damage ? ` + 卡面${tc.damage}` : ""}${smTxt}${ms?.winDamage ? ` + ${p.groups[gid].mode.模式}${ms.winDamage}` : ""}${nm ? "，本卡不计差值" : ""}）` : ""}
         ${ms?.loseDamage ? `<br>未命中仍造成 <b>${ms.loseDamage}</b> 点（${p.groups[gid].mode.模式}模式保底）` : ""}`;
     } else {
       const nm = !!card.noMarginDamage;
-      preview = `${multi ? `<b>第 ${k + 1} 击</b> → ${esc(enemy.name)}<br>` : ""}<b>单方面攻击</b>——不拼点，自动命中${
+      const flat = Math.max(0, card.baseDamage + tc.damage + psm.damage);
+      preview = `${multi ? `<b>第 ${k + 1} 击</b> → ${esc(enemy.name)}<br>` : ""}<b>${
+          noClash ? "不拼点（多重攻击的后续击）" : "单方面攻击"}</b>——不投骰，自动命中${
           nm ? "，<b>本卡不计差值</b>" : "，<b>差值 = 拼点值</b>"}
         ${card.baseDamage != null ? `<br>${nm ? "伤害 = " : "期望伤害 ≈ "}<b>${
-          nm ? (card.baseDamage + tc.damage)
-             : (multi ? (card.baseDamage + tc.damage) : (card.baseDamage + 3.5 + mod + tc.damage).toFixed(1))}</b>` : ""}
-        ${multi && !nm ? `<br><span style="color:var(--danger)">多重攻击的单方面那一击不计差值</span>` : ""}`;
+          nm || multi ? flat : (flat + 3.5 + mod).toFixed(1)}</b>（基础 ${card.baseDamage}${
+          tc.damage ? ` + 卡面${tc.damage}` : ""}${smTxt}）` : ""}
+        ${multi && !nm ? `<br><span style="color:var(--danger)">多重攻击不拼点的那一击不计差值</span>` : ""}`;
     }
     return foeList + intentList + `<div class="spot-sec"><div class="spot-preview">${preview}</div></div>`;
   };
@@ -1850,10 +1883,12 @@ function bindSpot(p, card, sel, kind) {
     const shots = shotsOf(card, pending), k = +el.dataset.shot;
     shots[k].enemyId = id;
     const e = state.enemies.find(x => x.id === id);
-    shots[k].intentId = autoIntent(e, shots, k);
-    // 选定第一击后，把还没指定的后续击默认放到同一个目标上（有「连击」可再改）
+    // 不拼点的那几击不占意图——占了会把意图从别的击那儿抢走，还会被误判成已结算
+    const pick = (i) => canClashShot(card, i + 1) ? autoIntent(e, shots, i) : null;
+    shots[k].intentId = pick(k);
+    // 选定第一击后，把还没指定的后续击默认放到同一个目标上（想分开打再点一次即可）
     if (k === 0) shots.forEach((sh, i) => {
-      if (i > 0 && !sh.enemyId) { sh.enemyId = id; sh.intentId = autoIntent(e, shots, i); }
+      if (i > 0 && !sh.enemyId) { sh.enemyId = id; sh.intentId = pick(i); }
     });
     pending.enemyId = shots[0].enemyId;
     pending.intentId = shots[0].intentId;
@@ -1987,8 +2022,9 @@ function playCard(p, card, sel, kind) {
     shots.forEach((s, h) => {
       const enemy = state.enemies.find(e => e.id === s.enemyId);
       if (!enemy) return;
-      // 每一击拼自己那条意图；已被结算的退化为单方面
-      const intent = enemy.intents.find(i => i.id === s.intentId && !i.resolved) || null;
+      // 每一击拼自己那条意图；已被结算的、以及默认不拼点的后续击，都退化为单方面
+      const intent = canClashShot(card, h + 1)
+        ? (enemy.intents.find(i => i.id === s.intentId && !i.resolved) || null) : null;
       // fixedRoll 优先于手填与随机——「不投骰」是这条特效的全部意义
       const roll = tc.fixedRoll ?? (manual >= 1 && manual <= 6 ? manual : d6());
       // 分击修正（集中/压制/不懈/变招）只作用于第 h+1 击，条件要看第一击的结果
@@ -2004,7 +2040,7 @@ function playCard(p, card, sel, kind) {
         bonusDamage: tc.damage + sm.damage, dcDown: tc.intentDown });
       let dmg = r.damage;
       // 单方面那一击不计差值，但卡面与分击的加伤照算——原来漏了 sm.damage
-      if (shots.length > 1 && r.oneSided) dmg = (card.baseDamage ?? 0) + tc.damage + sm.damage;
+      if (shots.length > 1 && r.oneSided) dmg = Math.max(0, (card.baseDamage ?? 0) + tc.damage + sm.damage);
       tally.set(enemy.id, (tally.get(enemy.id) || 0) + dmg);
       if (r.hit) anyHit = true; else allShotsHit = false;
       if (h === 0) firstShotHit = r.hit;

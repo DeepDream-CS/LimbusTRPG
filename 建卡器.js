@@ -238,6 +238,27 @@ const CARD_BASE_STATS = {
 };
 function cardBaseStats(trait, level){ return CARD_BASE_STATS[trait]?.[level] || null; }
 
+/* 同一张卡内互斥的问答选项。只在一边写 excludes:[{q,o}]（如傲慢「连击」指向「灵活」），
+   这里对称展开——两边都写必然会改一边忘另一边。
+   返回 "问序:选项序" → 挡住它的那个选项，界面据此把它锁灰并说明原因。 */
+function excludedOptions(qa, answers){
+  const blocked = new Map();
+  (qa||[]).forEach((q, qi) => {
+    const a = answers?.[qi];
+    if(a == null || !q.options[a]) return;
+    const picked = q.options[a];
+    const mark = (k) => blocked.set(k, {qi, label:picked.label});
+    (picked.excludes||[]).forEach(x => { if(x.q !== qi) mark(`${x.q}:${x.o}`); });
+    // 反向：别的选项声明了要和这一个互斥，那它自己也该被挡住
+    qa.forEach((q2, qi2) => { if(qi2===qi) return;
+      q2.options.forEach((o2, oi2) => {
+        if((o2.excludes||[]).some(x => x.q===qi && x.o===a)) mark(`${qi2}:${oi2}`);
+      });
+    });
+  });
+  return blocked;
+}
+
 /* 多重攻击：本卡自身的基础伤害。追加的那张卡用该罪孽「攻击·小技能」的值 */
 const MULTI_ATTACK_OWN = {large:5};   // 大技能专属，两次攻击各自的基础伤害（傲慢不吃差值，已补回）
 
@@ -292,8 +313,11 @@ function cardBaseEffect(trait, sinKey){
 function cardSkillBase(trait, sinKey, level){
   if(trait==="attack") return `基础伤害 ${sinAttackDamage(sinKey,level)}${dmgTail(sinKey)}`;
   if(trait==="multiAttack"){
-    return `本回合发动两次攻击、各自独立拼点，每次基础伤害 ${MULTI_ATTACK_OWN[level]}${dmgTail(sinKey)}。`
-      + (SIN_NO_MARGIN_DAMAGE[sinKey] ? "" : `其中任意一次若为单方面攻击（目标没有可对抗的意图），该次不计差值。`)
+    // 只拼一次是这张卡的定价：一张牌消两条攻击意图太强，要那个必须花掉「灵活」那一格
+    return `本回合发动两次攻击，每次基础伤害 ${MULTI_ATTACK_OWN[level]}${dmgTail(sinKey)}。`
+      + `只有第一次攻击拼点；第二次不拼点、自动命中，也因此消不掉敌方的攻击意图，目标可以另选。`
+      + `（选出「灵活」后第二次也能对抗一个攻击意图。）`
+      + (SIN_NO_MARGIN_DAMAGE[sinKey] ? "" : `不拼点的那一次不计差值。`)
       + `结算后将一张「${SIN_LABELS[sinKey]} · 普通攻击」加入本组（未使用）——本组循环因此变长`;
   }
   return CARD_SKILL_BASE[trait]?.[level]||"";
@@ -801,14 +825,22 @@ const SIN_TRAIT_QA = {
     multiAttack:{
       large:[
         {question:"你如何展开双重打击？",options:[
-          {label:"连击",effect:"两次攻击的目标可以不同（战斗器默认就是每击独立选目标）",stats:{noop:true}},
+          // 分目标的收益要靠「灵活」解锁第二次拼点才兑现得了，那样这一格就死绑另一题的一格了。
+          // 改成加一击：收益自足，和拼不拼点无关，也不看目标怎么分
+          // excludes 指向同卡另一问的「灵活」：三击已经把伤害铺得够开，再解开第二次拼点
+          // 就成了一张牌消两条意图 + 打三段——两头都占。二选一。
+          {label:"连击",effect:"本卡改为发动三次攻击；第三次攻击的伤害 -2（同样不拼点、自动命中）",
+           excludes:[{q:1,o:2}],stats:{extraHits:1,shot:3,shotDamage:-2}},
           {label:"集中",effect:"两次攻击对同一目标时，第二次攻击的伤害 +2",stats:{shot:2,cond:{sameTarget:true},shotDamage:2}},
-          {label:"变招",effect:"第二次攻击改用你另一组攻击模式的拼点属性（两组模式相同时改为第二次攻击的伤害 +2）",stats:{shot:2,altAttr:true,sameModeAlt:{shotDamage:2}}}
+          // 第二击默认不拼点，「改用另一组的拼点属性」就落不了地——那时和两组模式相同一样走替代值
+          {label:"变招",effect:"第二次攻击改用你另一组攻击模式的拼点属性（第二次攻击不拼点、或两组模式相同时，改为其伤害 +2）",stats:{shot:2,altAttr:true,sameModeAlt:{shotDamage:2}}}
         ]},
         {question:"多重攻击的节奏是？",options:[
-          {label:"不懈",effect:"若第一次攻击未命中，第二次攻击的拼点骰 +2",stats:{shot:2,cond:{firstMiss:true},shotDice:2}},
+          // 不懈与灵活同题，二选一——所以第二击带着「不懈」时必然不拼点，加骰没有意义，给伤害
+          {label:"不懈",effect:"若第一次攻击未命中，第二次攻击的伤害 +3",stats:{shot:2,cond:{firstMiss:true},shotDamage:3}},
           {label:"压制",effect:"若第一次攻击命中，第二次攻击的伤害 +1",stats:{shot:2,cond:{firstHit:true},shotDamage:1}},
-          {label:"灵活",effect:"你可以在第一次攻击结果出来后，再决定第二次攻击的目标"}
+          // 多重攻击默认只拼第一击。这条是解开第二次拼点的唯一钥匙，也是它能一张牌消两条意图的代价
+          {label:"灵活",effect:"第二次攻击也可以对抗一个攻击意图（独立拼点，可消掉第二条意图）",stats:{shot:2,canClash:true}}
         ]},
         {question:"双重打击的极致是？",options:[
           {label:"无间断",effect:"若两次攻击均命中，取消目标本轮尚未结算的所有意图",stats:{cond:{allHit:true},scope:"target",cancel:{kind:"any",n:"all"}}},
@@ -2292,14 +2324,18 @@ function renderCardQA(body,gid){
   const levelLabel=level==="large"?"大技能":"小技能";
   const baseEffect=cardSkillBase(entry.trait,sinKey,level);
   // 渲染问答
+  const blocked=excludedOptions(qa,entry.answers);
   const qaHtml=qa.map((q,qi)=>{
     const selected=entry.answers[qi];
-    const optsHtml=q.options.map((o,oi)=>`
-      <div class="qa-option${selected===oi?" sel":""}" data-q="${qi}" data-o="${oi}">
+    const optsHtml=q.options.map((o,oi)=>{
+      const bl=blocked.get(`${qi}:${oi}`);
+      return `
+      <div class="qa-option${selected===oi?" sel":""}${bl?" locked":""}" data-q="${qi}" data-o="${oi}">
         <div class="qa-opt-label">${String.fromCharCode(65+oi)}. ${o.label}</div>
         <div class="qa-opt-effect">${o.effect}</div>
+        ${bl?`<div class="qa-opt-lock">✕ 与问题 ${bl.qi+1} 的「${bl.label}」互斥，二选一</div>`:""}
       </div>
-    `).join("");
+    `;}).join("");
     return `<div class="qa-block">
       <div class="qa-question">问题 ${qi+1}：${q.question}</div>
       <div class="qa-options">${optsHtml}</div>
@@ -2343,6 +2379,7 @@ function renderCardQA(body,gid){
   // 选项点击（含「精益求精」的特效分配）
   body.querySelectorAll(".qa-option").forEach(el=>{
     el.onclick=()=>{
+      if(el.classList.contains("locked")){ toast("这一项与另一问已选的那条互斥，先改那边"); return; }
       if(!g[sinKey]) g[sinKey]={trait:entry.trait,answers:[]};
       if(el.dataset.extra!=null){ g[sinKey].extraEffect=parseInt(el.dataset.extra,10); render(); return; }
       g[sinKey].answers[parseInt(el.dataset.q,10)]=parseInt(el.dataset.o,10);
@@ -2922,6 +2959,11 @@ const sinName = (k) => k?SIN_LABELS[k]:"—";
    选项字母(A/B/C)的位置未变，仅内容被替换，因此用 q/o 索引定位。
    旧存档若命中以下组合，视为引用了已废弃的选项，读档时清空该问答并提示用户重选。 */
 const DEPRECATED_OPTIONS = [
+  // 多重攻击改成「默认只拼第一击」：连击/不懈/灵活换了效果，变招的落点也从换属性变成了加伤
+  {sin:"pride", trait:"multiAttack", level:"large", q:0, o:0},
+  {sin:"pride", trait:"multiAttack", level:"large", q:0, o:2},
+  {sin:"pride", trait:"multiAttack", level:"large", q:1, o:0},
+  {sin:"pride", trait:"multiAttack", level:"large", q:1, o:2},
   {sin:"wrath", trait:"attack", level:"large", q:0, o:2},
   {sin:"gloom", trait:"attack", level:"small", q:0, o:2},
   {sin:"gloom", trait:"attack", level:"large", q:0, o:2},
@@ -3074,6 +3116,17 @@ function migrateDeprecatedCardAnswers(){
             deprecatedCardNotices.push(`${gid==="a"?"A组":"B组"} · ${SIN_LABELS[sinKey]}·${TRAIT_LABELS[entry.trait]}·问题${d.q+1}`);
           }
         });
+      /* 互斥对是后加的规则，早于它的存档可能两边都选了。界面靠 excludedOptions 锁灰，
+         但那时两条都已经在 answers 里，会互相锁死；读档时就把靠后那一问清掉，留下前一个选择。 */
+      const qa = getSinQA(sinKey, entry.trait, level);
+      const blocked = excludedOptions(qa, entry.answers);
+      qa.forEach((q, qi) => {
+        const a = entry.answers[qi];
+        if(a == null || !blocked.has(`${qi}:${a}`)) return;
+        if(blocked.get(`${qi}:${a}`).qi > qi) return;   // 只清后面那一问，免得两边一起清空
+        entry.answers[qi] = null;
+        deprecatedCardNotices.push(`${gid==="a"?"A组":"B组"} · ${SIN_LABELS[sinKey]}·${TRAIT_LABELS[entry.trait]}·问题${qi+1}（与另一问互斥）`);
+      });
     }
   }
 }
