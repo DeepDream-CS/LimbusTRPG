@@ -367,10 +367,11 @@ function cardSkillBase(trait, sinKey, level){
    ※ 七个罪孽的问答特效均已过一遍；未挂 stats 的是条件类、延时类、替换语义与【切换】类。
    ※ stats 里带 partial:true 表示只自动了一部分，余下仍需手动。
    ※ 带「若…」的条件类、灼烧等延时伤害、【切换】类一律不挂 stats，留给 GM。
-   ※ onSwitchIn:true 标在选项对象上（不在 stats 里）：15 条「切换到此攻击模式时…」的触发点
-     是切进这一组，不是打出这张卡。战斗器据此在切换时把它们列出来提醒 GM，仍不自动结算——
-     放进 stats 会被 qaStats() 在打出时误结算。怠惰的「【切换】倾泻/久眠」是搭在 thenSwitch
-     上的「切出去时」条款，不属于这一类，别给它们加。 */
+   ※【切换】类（15 条）挂 stats.thenSwitch：打出这张卡 → 照常结算这条效果 → 立刻切到另一组，
+     不占行动槽。它**不是**「切进这一组时触发」——那个理解是错的，别再往回改。
+     怠惰的「【切换】倾泻/久眠」是搭在卡片级 thenSwitch 上的 onSwitchOut 条款，同一时机的另一半。
+     推论：给【切换】类挑效果时只写打出瞬间就能兑现的；「本轮自己拼点骰 +N」是死条款，
+     行动槽固定为 1，打完这张就没有下一次拼点了。 */
 const SIN_TRAIT_QA = {
   /* ★ 已结构化 */
   wrath:{
@@ -404,7 +405,7 @@ const SIN_TRAIT_QA = {
           // 「本轮不能打出防御卡」没有对应的禁用机制，整条留手动
           {label:"精疲力竭",effect:"你获得 4 点临时生命，但本轮不能打出防御卡",stats:{scope:"self",temp:4,noDefense:true}},
           {label:"怒不可遏",effect:"若此攻击使目标 HP 降至混乱线以下，你恢复 4 HP",stats:{cond:{killedToPanic:true},scope:"self",heal:4}},
-          {label:"【切换】怒焰冲天",effect:"切换到此攻击模式时，你对所有敌人造成 2 点伤害",onSwitchIn:true,stats:{scope:"allFoes",damage:2}}
+          {label:"【切换】怒焰冲天",effect:"打出后：对所有敌人造成 2 点伤害，然后切换到另一组攻击模式",stats:{scope:"allFoes",damage:2,thenSwitch:true}}
         ]}
       ]
     },
@@ -436,7 +437,7 @@ const SIN_TRAIT_QA = {
         {question:"愤怒的壁垒能撑多久？",options:[
           {label:"以攻代守",effect:"防御胜利时额外造成 2 点伤害，防御失败时仍对攻击者造成 2 点伤害",stats:{win:{damage:2},lose:{damage:2}}},
           {label:"怒焰护体",effect:"防御胜利时，攻击者受到 3 点灼烧伤害",stats:{win:{damage:3}}},
-          {label:"【切换】怒焰之壁",effect:"切换到此攻击模式时，对所有敌人造成 3 点伤害",onSwitchIn:true,stats:{scope:"allFoes",damage:3}}
+          {label:"【切换】怒焰之壁",effect:"打出后：对所有敌人造成 3 点伤害，然后切换到另一组攻击模式",stats:{scope:"allFoes",damage:3,thenSwitch:true}}
         ]}
       ]
     }
@@ -470,7 +471,7 @@ const SIN_TRAIT_QA = {
         {question:"欲望的终点是？",options:[
           {label:"独占",effect:"本次伤害 +2，你对同一目标再立即造成 2 点伤害",stats:{scope:"target",thisDamage:2,damage:2}},
           {label:"沉溺",effect:"你获得 4 点临时生命",stats:{scope:"self",temp:4}},
-          {label:"【切换】欲念缠绕",effect:"切换到此攻击模式时，你恢复 3 HP，一名友方恢复 2 HP",onSwitchIn:true,stats:{scope:"self",heal:3,allyScope:"oneAlly",allyHeal:2}}
+          {label:"【切换】欲念缠绕",effect:"打出后：你恢复 3 HP，一名友方恢复 2 HP，然后切换到另一组攻击模式",stats:{scope:"self",heal:3,allyScope:"oneAlly",allyHeal:2,thenSwitch:true}}
         ]}
       ]
     },
@@ -503,7 +504,7 @@ const SIN_TRAIT_QA = {
         {question:"增幅的极致是？",options:[
           {label:"共鸣",effect:"所有友方本轮拼点骰 +1",stats:{scope:"allAllies",diceUp:1}},
           {label:"安抚",effect:"你与一名友方的罪孽压力各 -1（最低为 0），并各获得 2 点临时生命",stats:{scope:"selfAndAlly",pressure:-1,temp:2}},
-          {label:"【切换】欲望之潮",effect:"切换到此攻击模式时，你和所有友方各恢复 2 HP",onSwitchIn:true,stats:{scope:"allAllies",heal:2}}
+          {label:"【切换】欲望之潮",effect:"打出后：你和所有友方各恢复 2 HP，然后切换到另一组攻击模式",stats:{scope:"allAllies",heal:2,thenSwitch:true}}
         ]}
       ]
     }
@@ -611,7 +612,7 @@ const SIN_TRAIT_QA = {
           {label:"消化吸收",effect:"移除目标身上一个增益效果，你恢复 5 HP；若其没有增益，改为获得 5 点临时生命",stats:{scope:"target",cancel:{kind:"buff",n:1},selfHeal:5,orElse:{selfTemp:5}}},
           // extraDiscard 是「不带弃牌步骤的卡额外弃一张」，战斗器会在投骰前补一个选择器
           {label:"吐故纳新",effect:"由你额外选择弃掉本组一张未使用卡片，你恢复 5 HP",stats:{scope:"self",heal:5,extraDiscard:1,needDiscard:true}},
-          {label:"【切换】暴食之躯",effect:"切换到此攻击模式时，你恢复 3 HP，并获得 2 点临时生命",onSwitchIn:true,stats:{scope:"self",heal:3,temp:2}}
+          {label:"【切换】暴食之躯",effect:"打出后：你恢复 3 HP 并获得 2 点临时生命，然后切换到另一组攻击模式",stats:{scope:"self",heal:3,temp:2,thenSwitch:true}}
         ]}
       ]
     },
@@ -646,7 +647,7 @@ const SIN_TRAIT_QA = {
           {label:"照单全收",effect:"防御成功时，移除攻击者身上一个增益效果，你恢复 3 HP",stats:{win:{cancel:{kind:"buff",n:1},heal:3}}},
           // 与傲慢的「固若金汤」同机制，暴食口味；原「饱腹」的回 3 与同问「照单全收」重叠
           {label:"囫囵吞下",effect:"防御成功时，该敌人本轮所有攻击意图一并被吞下（精英只吞下打向同一目标的，BOSS 无效）",stats:{win:{blockAll:true}}},
-          {label:"【切换】饥饿循环",effect:"切换到此攻击模式时，你恢复 2 HP",onSwitchIn:true,stats:{scope:"self",heal:2}}
+          {label:"【切换】饥饿循环",effect:"打出后：你恢复 2 HP，然后切换到另一组攻击模式",stats:{scope:"self",heal:2,thenSwitch:true}}
         ]}
       ]
     },
@@ -680,7 +681,7 @@ const SIN_TRAIT_QA = {
           // 弃整组、从弃牌堆捡回，都需要额外的卡组操作，留手动
           {label:"鲸吞",effect:"弃掉当前组中所有剩余未使用卡片，你恢复等同于弃掉卡片数×2的HP，当前组立即刷新",stats:{devour:2}},
           {label:"反刍",effect:"从已弃掉的卡片中取回一张加入当前组（本次不消耗）",stats:{restore:1}},
-          {label:"【切换】饥饿吞噬",effect:"切换到此攻击模式时，你恢复 3 HP（弃牌请在卡组面板手动操作）",onSwitchIn:true,stats:{scope:"self",heal:3,partial:true}}
+          {label:"【切换】饥饿吞噬",effect:"打出后：你恢复 3 HP，然后切换到另一组攻击模式",stats:{scope:"self",heal:3,thenSwitch:true}}
         ]}
       ]
     }
@@ -716,7 +717,7 @@ const SIN_TRAIT_QA = {
         {question:"苦难的尽头是？",options:[
           {label:"共鸣",effect:"若你当前 HP 低于 50%，本次伤害 +4",stats:{cond:{selfHpBelowHalf:true},thisDamage:4}},
           {label:"绝望蔓延",effect:"与目标相邻的敌人本轮意图值各 -2，且本轮受到的伤害各 +2",stats:{scope:"adjAll",intentDown:2,dmgTakenUp:2}},
-          {label:"【切换】忧郁气场",effect:"切换到此攻击模式时，所有敌人本轮意图值 -1",onSwitchIn:true,stats:{scope:"allFoes",intentDown:1}}
+          {label:"【切换】忧郁气场",effect:"打出后：所有敌人本轮意图值 -1，然后切换到另一组攻击模式",stats:{scope:"allFoes",intentDown:1,thenSwitch:true}}
         ]}
       ]
     },
@@ -750,7 +751,7 @@ const SIN_TRAIT_QA = {
           {label:"虚弱领域",effect:"所有敌人本轮意图值 -1",stats:{scope:"allFoes",intentDown:1}},
           {label:"以痛止痛",effect:"你受到 2 点伤害，一名友方本轮拼点骰 +2",stats:{scope:"oneAlly",diceUp:2,selfDamage:2}},
           // 【切换】类由切换攻击模式时触发，不在打出这张卡时结算
-          {label:"【切换】绝望之影",effect:"切换到此攻击模式时，所有敌人本轮受到的伤害 +2",onSwitchIn:true,stats:{scope:"allFoes",dmgTakenUp:2}}
+          {label:"【切换】绝望之影",effect:"打出后：所有敌人本轮受到的伤害 +2，然后切换到另一组攻击模式",stats:{scope:"allFoes",dmgTakenUp:2,thenSwitch:true}}
         ]}
       ]
     }
@@ -791,7 +792,7 @@ const SIN_TRAIT_QA = {
           {label:"不容差错",effect:"若此卡命中，本次伤害 +4；若未命中，你受到 3 点伤害且罪孽压力 +1",stats:{thisDamage:4,altIf:{cond:{miss:true},selfDamage:3,selfPressure:1}}},
           // 「游刃有余」留给傲慢·防御·大技能那条（免费切换攻击模式＝行动自如），这里避重名
           {label:"余裕",effect:"你获得 3 点临时生命",stats:{scope:"self",temp:3}},
-          {label:"【切换】王者之姿",effect:"切换到此攻击模式时，你本轮拼点骰 +1，恢复 2 HP",onSwitchIn:true,stats:{scope:"self",diceUp:1,heal:2}}
+          {label:"【切换】王者之姿",effect:"打出后：你恢复 2 HP 并获得 3 点临时生命，然后切换到另一组攻击模式",stats:{scope:"self",heal:2,temp:3,thenSwitch:true}}
         ]}
       ]
     },
@@ -824,7 +825,7 @@ const SIN_TRAIT_QA = {
           // 强度按敌人类型递减，BOSS 免疫，免得单体大敌被一张卡关掉整轮
           {label:"固若金汤",effect:"防御成功时，该敌人本轮所有攻击意图一并被挡下（精英只挡下打向同一目标的，BOSS 无效）",stats:{win:{blockAll:true}}},
           {label:"全盘掌控",effect:"防御成功时你获得 3 点临时生命",stats:{win:{temp:3}}},
-          {label:"【切换】绝对防御",effect:"切换到此攻击模式时，你获得 4 点临时生命",onSwitchIn:true,stats:{scope:"self",temp:4}}
+          {label:"【切换】绝对防御",effect:"打出后：你获得 4 点临时生命，然后切换到另一组攻击模式",stats:{scope:"self",temp:4,thenSwitch:true}}
         ]}
       ]
     },
@@ -851,7 +852,7 @@ const SIN_TRAIT_QA = {
         {question:"双重打击的极致是？",options:[
           {label:"无间断",effect:"若两次攻击均命中，取消目标本轮尚未结算的所有意图",stats:{cond:{allHit:true},scope:"target",cancel:{kind:"any",n:"all"}}},
           {label:"精益求精",effect:"加入卡组的那张普通攻击也获得本卡的一条特效",stats:{grantExtra:true}},
-          {label:"【切换】绝对支配",effect:"切换到此攻击模式时，你本轮拼点骰 +1（原「两次攻击伤害各 +1」改为通用加骰）",onSwitchIn:true,stats:{scope:"self",diceUp:1}}
+          {label:"【切换】绝对支配",effect:"打出后：你获得 5 点临时生命，然后切换到另一组攻击模式",stats:{scope:"self",temp:5,thenSwitch:true}}
         ]}
       ]
     }
@@ -885,7 +886,7 @@ const SIN_TRAIT_QA = {
         {question:"不甘的尽头是？",options:[
           {label:"同归于尽",effect:"你和目标各受到 3 点伤害，你的罪孽压力 +1",stats:{scope:"target",damage:3,selfDamage:3,selfPressure:1}},
           {label:"后来居上",effect:"若本次伤害使目标 HP 降至低于你，你恢复 3 HP",stats:{cond:{foeHpBelowSelf:true},scope:"self",heal:3}},
-          {label:"【切换】不甘之眼",effect:"切换到此攻击模式时，一名敌人本轮意图值 -1",onSwitchIn:true,stats:{scope:"target",intentDown:1}}
+          {label:"【切换】不甘之眼",effect:"打出后：目标本轮意图值 -1，然后切换到另一组攻击模式",stats:{scope:"target",intentDown:1,thenSwitch:true}}
         ]}
       ]
     },
@@ -916,7 +917,7 @@ const SIN_TRAIT_QA = {
         {question:"嫉妒之壁的尽头是？",options:[
           {label:"学而胜之",effect:"防御成功时，你本轮拼点骰 +2，并恢复 2 HP",stats:{win:{diceUp:2,heal:2}}},
           {label:"后来居上",effect:"若你的 HP 低于攻击者，防御成功时你恢复 3 HP",stats:{cond:{selfHpBelowFoe:true},win:{heal:3}}},
-          {label:"【切换】不甘之壁",effect:"切换到此攻击模式时，移除一名敌人身上一个增益效果",onSwitchIn:true,stats:{scope:"target",cancel:{kind:"buff",n:1}}}
+          {label:"【切换】不甘之壁",effect:"打出后：移除目标身上一个增益效果，然后切换到另一组攻击模式",stats:{scope:"target",cancel:{kind:"buff",n:1},thenSwitch:true}}
         ]}
       ]
     },
@@ -947,7 +948,7 @@ const SIN_TRAIT_QA = {
         {question:"嫉妒的尽头是？",options:[
           {label:"公之于众",effect:"移除一名敌人身上的所有增益效果，其本轮意图值 -1",stats:{scope:"target",cancel:{kind:"buff",n:"all"},intentDown:1}},
           // 「不甘之眼」留给嫉妒·攻击·大技能那条（「眼」盯单个目标）；辅助这条敌我两边都管，归入「援」
-          {label:"【切换】不甘之援",effect:"切换到此攻击模式时，一名敌人本轮意图值 -1，一名友方本轮拼点骰 +1",onSwitchIn:true,stats:{scope:"target",intentDown:1,allyScope:"oneAlly",allyDiceUp:1}},
+          {label:"【切换】不甘之援",effect:"打出后：目标本轮意图值 -1，一名友方本轮拼点骰 +1，然后切换到另一组攻击模式",stats:{scope:"target",intentDown:1,allyScope:"oneAlly",allyDiceUp:1,thenSwitch:true}},
           {label:"逆转",effect:"若场上任何敌人 HP 高于所有友方，你恢复 3 HP",stats:{cond:{anyFoeAboveAllies:true},scope:"self",heal:3}}
         ]}
       ]
@@ -1376,10 +1377,7 @@ function buildCardGroupExport(gid){
           if(a!=null && qa[i]?.options?.[a]){
             const o=qa[i].options[a];
             effects.push(`${o.label}——${o.effect}`);
-            // onSwitchIn 标在条目上而不是塞进 stats：这类【切换】特效由「切到此组」触发，
-            // 不该在打出这张卡时被 qaStats() 当普通特效结算。条件展开，免得给其余两百多条塞 false
-            qaPicked.push({label:o.label, effect:o.effect, stats:o.stats||null,
-                           ...(o.onSwitchIn?{onSwitchIn:true}:{})});
+            qaPicked.push({label:o.label, effect:o.effect, stats:o.stats||null});
           }
         });
       }
@@ -1746,6 +1744,7 @@ function renderStep2(){
       <br><b>接线：</b> 在自己的行动里主动打出防御 / 援护 / 反击卡，接下敌方某条尚未结算的攻击意图。
       <br>· <b>接线和攻击一样占掉一个行动槽</b>——防御就是这一槽的行动，防完不能再出牌，单槽角色因此是「攻」与「防」二选一
       <br>· <b>每轮限接一次</b>；接的那一击可以是打向队友的（援护只能替别人挡）
+      <br>· 接线卡和其他卡一样<b>只能从你当前那一组出</b>，另一组的防御要先切过去才用得上——所以配卡时两组都留一张防御，还是赌一组全攻，是一个真实的取舍
       <br>· 没有独立的「敌方回合」：所有人行动完后，仍没人接的攻击意图直接落地，那一步不能再补防御
       <br>· 未接线的攻击自动命中：伤害 = 基础伤害 + (意图值 - 体魄)，最低为 0
     </div>
@@ -2968,6 +2967,24 @@ const sinName = (k) => k?SIN_LABELS[k]:"—";
    选项字母(A/B/C)的位置未变，仅内容被替换，因此用 q/o 索引定位。
    旧存档若命中以下组合，视为引用了已废弃的选项，读档时清空该问答并提示用户重选。 */
 const DEPRECATED_OPTIONS = [
+  // 【切换】语义修正：原先理解成「切进这一组时触发」，实际是「打出此卡 → 结算 → 切到另一组」。
+  // 15 条的触发时机与文案全变了，其中王者之姿/绝对支配的收益也换掉了（原来的「本轮自己拼点骰 +1」
+  // 打完自己那一槽就没处用了）。全部要求重选。
+  {sin:"wrath",    trait:"attack",      level:"large", q:2, o:2},   // 怒焰冲天
+  {sin:"wrath",    trait:"defense",     level:"large", q:2, o:2},   // 怒焰之壁
+  {sin:"lust",     trait:"attack",      level:"large", q:2, o:2},   // 欲念缠绕
+  {sin:"lust",     trait:"buff",        level:"large", q:2, o:2},   // 欲望之潮
+  {sin:"gluttony", trait:"attack",      level:"large", q:2, o:2},   // 暴食之躯
+  {sin:"gluttony", trait:"defense",     level:"large", q:2, o:2},   // 饥饿循环
+  {sin:"gluttony", trait:"special",     level:"large", q:2, o:2},   // 饥饿吞噬
+  {sin:"gloom",    trait:"attack",      level:"large", q:2, o:2},   // 忧郁气场
+  {sin:"gloom",    trait:"debuff",      level:"large", q:2, o:2},   // 绝望之影
+  {sin:"pride",    trait:"attack",      level:"large", q:2, o:2},   // 王者之姿
+  {sin:"pride",    trait:"defense",     level:"large", q:2, o:2},   // 绝对防御
+  {sin:"pride",    trait:"multiAttack", level:"large", q:2, o:2},   // 绝对支配
+  {sin:"envy",     trait:"attack",      level:"large", q:2, o:2},   // 不甘之眼
+  {sin:"envy",     trait:"defense",     level:"large", q:2, o:2},   // 不甘之壁
+  {sin:"envy",     trait:"support",     level:"large", q:2, o:1},   // 不甘之援
   // 多重攻击重做：默认两击都拼点（回到最初），连击给第三击、灵活换成全击加骰；
   // 集中→碾压、不懈→威压、压制→不容折辱（原来那三条都是挂在第二击上的条件微调，量级不够）。
   // 变招也在列——它中途被改过一版措辞，答案含义跟着变过
@@ -2999,7 +3016,6 @@ const DEPRECATED_OPTIONS = [
   {sin:"pride", trait:"attack", level:"small", q:0, o:2},
   {sin:"pride", trait:"attack", level:"large", q:0, o:2},
   // 「变招」原为「两次攻击可以使用不同的拼点属性」，拼点属性绑定攻击模式后改写
-  {sin:"pride", trait:"multiAttack", level:"small", q:0, o:2},
   {sin:"pride", trait:"multiAttack", level:"large", q:0, o:2},
   // 速度系统删除后，以下选项原本写的是「当前速度 ±N」，已逐条改写为别的效果
   {sin:"wrath", trait:"defense", level:"small", q:0, o:2},
@@ -3018,7 +3034,6 @@ const DEPRECATED_OPTIONS = [
   {sin:"envy", trait:"support", level:"small", q:0, o:2},
   {sin:"envy", trait:"support", level:"large", q:0, o:2},
   // 「压制」原为「目标不能对第二次攻击进行防御」——会触发无防御卡规则、差值暴涨，改为定额加伤
-  {sin:"pride", trait:"multiAttack", level:"small", q:1, o:1},
   {sin:"pride", trait:"multiAttack", level:"large", q:1, o:1},
   // 空转文案重写：「迅捷」「完美计算」在现行规则下都不产生任何效果
   {sin:"pride", trait:"multiAttack", level:"large", q:1, o:0},
@@ -3079,9 +3094,7 @@ const DEPRECATED_OPTIONS = [
   {sin:"pride", trait:"attack", level:"large", q:1, o:1},
   {sin:"pride", trait:"multiAttack", level:"large", q:2, o:0},
   // 多重攻击的加骰改为加伤：两次攻击叠加拼点骰会让命中率逼近必中
-  {sin:"pride", trait:"multiAttack", level:"small", q:0, o:1},
   {sin:"pride", trait:"multiAttack", level:"large", q:0, o:1},
-  {sin:"pride", trait:"multiAttack", level:"small", q:2, o:2},
   {sin:"pride", trait:"multiAttack", level:"large", q:2, o:2},
   // 怠惰·反击大技能改为爆发输出，第二问的「厚积薄发」与第三问整题被替换
   {sin:"sloth", trait:"counter", level:"large", q:1, o:0},

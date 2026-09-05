@@ -6,8 +6,9 @@
      拼点值 = 1D6 + 属性 + 各项修正；拼点值 ≥ 意图值 即成功，差值 = 拼点值 - 意图值
      攻击   伤害 = 基础伤害 + 差值；攻击意图被拼过一次就结算，无论我方成败
      接线   防御/援护/反击在自己的行动里主动打出，接下敌方某条攻击意图。
-            占一个行动槽——防御就是这一槽的行动，防完不能再出牌。
-            每轮仍限接一次；接的那一击不必打向自己：叙事上就是替别人挡下来。
+            占一个行动槽，防御就是这一槽的行动，防完不能再出牌。
+            每轮仍限接一次。接的那一击不必打向自己，叙事上就是替别人挡下来。
+            和其他卡一样只能从当前架势那一组出，另一组的防御要先切过去。
      敌方攻击  没有独立的「敌方回合」。所有人都行动完、仍有攻击意图没人接线时，
             这些意图自动落地：伤害 = 敌方基础伤害 + (意图值 - 体魄)，最低为 0
             到这一步已经没人有行动槽，所以接线必须在自己的行动里提前打出
@@ -350,35 +351,16 @@ function condMet(cond, c = {}) {
 }
 
 /* 卡上所有带 stats 的问答条目 */
-/* 卡上所有带 stats 的问答条目。**必须排除 onSwitchIn**——那些的触发点是切进这一组，
-   不是打出这张卡；它们现在也挂了 stats，不排掉就会在打出时被误结算一次。 */
-const qaStats = (card) => (card.qa || []).filter(q => q.stats && !q.onSwitchIn);
-/* 切进某一组时，该组卡片上已选的【切换】特效。这些条目 stats 为 null，
-   qaStats() 天然不会在打出那张卡时结算它们——这里只把它们列出来提醒 GM。
-   一组里多张卡都选了【切换】就全列出，触发几条是规则判断，交给 GM。 */
-const switchInEffects = (p, gid) => p.groups[gid].cards
-  .flatMap(c => (c.qa || []).filter(q => q.onSwitchIn).map(q => ({ card: c, ...q })));
-/* 切换进某组时，这一组的【切换】特效会自动结算（见 switchInLines） */
-const switchInAuto = (p, gid) => switchInEffects(p, gid).filter(x => x.stats).length;
-/* 【切换】特效现在自动结算。要指定单个对象的（「一名敌人」）取敌人列表的第一个，
-   日志写明是谁，GM 觉得不对可以直接改数值——比让整条落空强。 */
-const switchInLines = (p, gid) => {
-  const list = switchInEffects(p, gid);
-  if (!list.length) return [];
-  const out = [`${gid.toUpperCase()}组的【切换】特效：`];
-  const foe = state.enemies[0] || null;
-  for (const x of list) {
-    if (!x.stats) { out.push(`  ▸ 「${x.label}」——${esc(x.effect)}（需自行结算）`); continue; }
-    out.push(...applyQaStat({ label: x.label, stats: x.stats },
-      { player: p, foe, extraFoe: foe, extraAlly: activePlayers().find(a => a !== p) || p }, {}));
-  }
-  return out;
-};
+const qaStats = (card) => (card.qa || []).filter(q => q.stats);
+/* 【切换】类问答：打出这张卡 → 照常结算这条效果 → 立刻切到另一组，不占行动槽。
+   触发点是**打出**，不是「切进这一组」——所以它就是普通的 stats，走 qaStats() 那条路，
+   这里只负责回答「结算完要不要换组」。怠惰卡片级的 thenSwitch 是同一时机的另一半。 */
+const qaThenSwitch = (card) => qaStats(card).some(q => q.stats.thenSwitch);
 /* 统一的换架势入口，三条路径（行动切换 / thenSwitch / 免费切换）都走它 */
 function setStance(p, gid, why) {
   if (p.stance === gid) return [`${p.name} 已经在 ${gid.toUpperCase()}组，无需切换`];
   p.stance = gid;
-  return [`${why}：${p.name} 架势 → ${gid.toUpperCase()}组 ${modeName(p, gid)}`].concat(switchInLines(p, gid));
+  return [`${why}：${p.name} 架势 → ${gid.toUpperCase()}组 ${modeName(p, gid)}`];
 }
 
 /* 解析 scope → 实际对象列表 */
@@ -897,9 +879,10 @@ function resolveIntercept({ who, target, card, mod, enemy, intent, roll, dmgRoll
     if (k.heal) lines.push(`  ▸ ${q.label}：${healLine(who, k.heal)}`);
     if (k.temp) lines.push(`  ▸ ${q.label}：${tempLine(who, k.temp)}`);
   }
-  // 【切换】结算后换到另一组。以卡所属组的对侧为准——接线卡可以跨组打出
-  if (st.thenSwitch) {
-    // 搭在 thenSwitch 上的「切出去时」条款（倾泻 / 久眠）——切进来的那套是 onSwitchIn，两回事
+  // 【切换】结算后换到另一组。按卡所属组取对侧，那也就是当前架势的对侧。
+  // 卡片级（怠惰的反击/援护）与问答级（各罪孽的【切换】选项）走同一条路，只切一次
+  if (st?.thenSwitch || qaThenSwitch(card)) {
+    // 搭在 thenSwitch 上的「切出去时」加码条款（倾泻 / 久眠）
     for (const q of qaStats(card)) {
       const o = q.stats.onSwitchOut; if (!o) continue;
       if (o.temp) lines.push(`  ▸ ${q.label}：${tempLine(who, o.temp)}`);
@@ -1251,7 +1234,7 @@ function spotStep() {
    sel.shots[0] 与 sel.enemyId 保持同步，好让问答特效的 target 作用面仍指主目标。 */
 /* 问答加的击数（傲慢「连击」）。card.hits 是卡片级导出，加击是问答级的，两者相加才是真正打几下 */
 const extraHitsOf = (card) => (card.qa || [])
-  .reduce((a, q) => a + ((q.stats && !q.onSwitchIn && q.stats.extraHits) || 0), 0);
+  .reduce((a, q) => a + ((q.stats && q.stats.extraHits) || 0), 0);
 function shotsOf(card, sel) {
   const n = (card.hits || 1) + (card.hits > 1 ? extraHitsOf(card) : 0);
   if (!sel.shots || sel.shots.length !== n)
@@ -1371,18 +1354,16 @@ function qaPreview(card) {
           card.effects.slice(1).map(e => `<br>▸ ${esc(e)}`).join("")}</div>`
       : "";
   }
-  // 【切换】类单列：它们在切架势时才结算，摆在「打出这张卡会发生什么」里会误导
-  const swi = card.qa.filter(q => q.onSwitchIn);
-  const auto = qaStats(card), manual = card.qa.filter(q => !q.stats && !q.onSwitchIn);
-  if (!auto.length && !manual.length && !swi.length) return "";
+  const auto = qaStats(card), manual = card.qa.filter(q => !q.stats);
+  const swi = qaThenSwitch(card);
+  if (!auto.length && !manual.length) return "";
   return `<div class="spot-preview note">
     ${auto.length ? `<b>问答特效（自动结算）</b>${auto.map(q =>
       `<br>▸ ${esc(q.label)}——${esc(q.effect)} <span class="ptag${q.stats.partial ? " warn" : ""}">${
         q.stats.partial ? "部分自动，余下手动" : (SCOPE_LABEL[q.stats.scope] || "")}</span>`).join("")}` : ""}
     ${manual.length ? `${auto.length ? "<br><br>" : ""}<b>问答特效（需自行结算）</b>${manual.map(q =>
       `<br>▸ ${esc(q.label)}——${esc(q.effect)}`).join("")}` : ""}
-    ${swi.length ? `<br><br><b>【切换】特效（切到本组时才触发，不在这次打出）</b>${swi.map(q =>
-      `<br>▸ ${esc(q.label)}——${esc(q.effect)}`).join("")}` : ""}
+    ${swi ? `<br><br><span style="color:var(--accent-2)">⇄ 本卡带【切换】：结算完会自动换到另一组，不占行动槽</span>` : ""}
   </div>`;
 }
 
@@ -1451,9 +1432,12 @@ function renderSpot() {
   if (p.actedRound !== state.round) { p.actedRound = state.round; p.slotUsed = 0; }
 
   const g = groupOf(p);
-  // 常规牌只能从当前架势那一组出；接线牌两组都能用（它照样吃掉这一个槽）
-  const reactAvail = ["a", "b"].flatMap(gid => availableCards(p.groups[gid]).filter(c => kindOf(c) === "reaction"));
-  const slotAvail = availableCards(g).filter(c => kindOf(c) !== "reaction");
+  /* 所有牌都只能从当前架势那一组出，接线牌也一样。
+     接线曾经不占行动槽，是一次免费的被动反应，那时两组的防御牌都能拿来挡说得通。
+     改成占槽之后它就是一个普通行动了，再让它多一倍牌库，攻击就白白吃亏，
+     「选哪一组」这个决策也没了分量——这一组不带防御就是真防不了，得花一个槽切过去。 */
+  const slotAvail = availableCards(g);
+  const reactAvail = slotAvail.filter(c => kindOf(c) === "reaction");
   const sel = sel0, card = card0;
 
   const head = `
@@ -1482,7 +1466,7 @@ function renderSpot() {
 
   let body;
   if (!card) {
-    const shown = [...slotAvail, ...reactAvail];
+    const shown = slotAvail;
     body = renderStancePick(p, sel) + `
       <div class="spot-sec"><h3>${p.stance.toUpperCase()}组剩余 ${availableCards(g).length} / ${g.cards.length} 张${availableCards(g).length === 0 ? "——用完即刷新" : ""}</h3>
         <div class="card-pick">${shown.map(c => {
@@ -1490,7 +1474,7 @@ function renderSpot() {
           const gid = groupIdOfCard(p, c);
           return `<div class="pick${why ? " locked" : ""}"${why ? "" : ` data-card="${c.uid}"`}>
             <b>${esc(c.sinLabel)} · ${esc(c.traitLabel)}</b>
-            <small>${esc(c.levelLabel)} · ${KIND_LABEL[k]}${k === "reaction" ? ` · ${gid.toUpperCase()}组` : ""}</small>
+            <small>${esc(c.levelLabel)} · ${KIND_LABEL[k]}</small>
             <div class="pick-tags">
               ${c.clashAttr ? `<span class="ptag">拼点 ${esc(c.clashAttr)}(${p.attrs[c.clashAttr] ?? 0})</span>`
                             : `<span class="ptag mute">不拼点</span>`}
@@ -1501,7 +1485,7 @@ function renderSpot() {
             <div class="pick-eff">${esc(c.effects[0] || "")}</div>
           </div>`;
         }).join("") || `<p class="hint">没有可打的卡了。</p>`}</div>
-        ${reactAvail.length ? `<p class="hint">接线卡和攻击一样占掉这一个行动槽——防御就是这一槽的行动，打完不能再出牌。每轮限接一次；接的那一击可以是打向队友的。</p>` : ""}
+        ${reactAvail.length ? `<p class="hint">接线卡和攻击一样占掉这一个行动槽，防御就是这一槽的行动，打完不能再出牌。每轮限接一次，接的那一击可以是打向队友的。牌只能从当前架势这一组出，另一组的防御要先切过去才用得上。</p>` : ""}
       </div>`;
   } else {
     body = `
@@ -1535,7 +1519,7 @@ function renderStancePick(p, sel) {
       <div class="pu-head"><b>${gid.toUpperCase()}组 · ${esc(m?.模式 || "未设定模式")}</b>
         <span class="pu-tag">${cur ? "当前架势" : "切换需 1 行动槽"}</span></div>
       <div class="pu-meta">${m ? `拼点属性 ${esc(m.拼点属性)} · ${esc(m.副效果)}` : "建卡时没给这一组选攻击模式"}
-        <br>可用 ${availableCards(gg).length}/${gg.cards.length} 张${switchInEffects(p, gid).length ? ` · 有 ${switchInEffects(p, gid).length} 条【切换】特效` : ""}</div>
+        <br>可用 ${availableCards(gg).length}/${gg.cards.length} 张</div>
     </div>`;
   }).join("");
 
@@ -1544,7 +1528,6 @@ function renderStancePick(p, sel) {
       ${esc(p.name)} 换到 <b>${to.toUpperCase()}组 ${esc(modeName(p, to))}</b>，之后从这一组出牌
       <br><span style="color:var(--accent-2)">消耗一个行动槽——切换后行动槽变为 ${p.slotUsed + 1}/${p.slotCount}${
         p.slotUsed + 1 >= p.slotCount ? "，本回合行动结束" : ""}</span>
-      ${switchInEffects(p, to).map(x => `<br>▸ ${esc(x.card.sinLabel)}·${esc(x.card.traitLabel)}「${esc(x.label)}」——${esc(x.effect)} <span class="ptag warn">需自行结算</span>`).join("")}
     </div>
     <div class="roll-row"><button class="btn primary big" id="btnStance">⇄ 切换架势（消耗一个行动槽）</button></div>` : "";
 
@@ -2109,6 +2092,9 @@ function playCard(p, card, sel, kind) {
   const refreshed = consumeCard(g, card);
   if (refreshed) lines.push(`※ ${gid.toUpperCase()}组已用完，卡组刷新`);
   lines.push(`${gid.toUpperCase()}组 剩余 ${availableCards(g).length}/${g.cards.length} 张`);
+  // 【切换】问答：效果已经在上面照常结算过了，这里只负责把架势换到另一组（不占行动槽）。
+  // 接线那条路在 resolveIntercept 里换，别在这儿重复——它走的是自己的 return
+  if (qaThenSwitch(card)) lines.push(...setStance(p, otherStance(gid), "【切换】结算后换组（不占行动槽）"));
 
   p.slotUsed++;
   pending = null;

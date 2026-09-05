@@ -18,19 +18,16 @@
   /* 罪孽值 1/2/3 分别产出基础 / 小技能 / 大技能，与 sinCardLevel() 一致 */
   const LEVEL_VALUE = { basic: 1, small: 2, large: 3 };
 
-  /* 自动化四档。判定顺序必须和战斗器的 qaStats() / qaPreview() 一致：
-     onSwitchIn 的条目 stats 是 null，要先判它，否则会被误标成「需自行结算」。
-     【切换】类现在也自动结算，只是触发点不同——战斗器在 setStance() 切进这一组时算，
-     不是打出这张卡时（所以 qaStats() 必须排除它们）。单列一档是为了标明这个时机差异。 */
+  /* 自动化三档，判定顺序必须和战斗器的 qaStats() / qaPreview() 一致。
+     【切换】类不再单列——它的触发点就是「打出这张卡」，和其余条目一样，
+     只是结算完会额外把架势换到另一组（stats.thenSwitch），仍属自动结算。 */
   const AUTO = {
     auto:   { label: "自动结算",   cls: "ok" },
     part:   { label: "部分自动",   cls: "warn" },
-    manual: { label: "需自行结算", cls: "manual" },
-    swi:    { label: "【切换】切进时自动", cls: "swi" }
+    manual: { label: "需自行结算", cls: "manual" }
   };
-  const AUTO_ORDER = ["auto", "part", "manual", "swi"];
+  const AUTO_ORDER = ["auto", "part", "manual"];
   function autoKindOf(opt) {
-    if (opt.onSwitchIn) return "swi";      // 切进这一组时触发，不是打出时
     if (!opt.stats) return "manual";
     return opt.stats.partial ? "part" : "auto";
   }
@@ -147,6 +144,7 @@
               <b>${esc(o.label)}</b>
               <span class="qa-eff">${esc(o.effect)}</span>
               ${ex.length ? `<span class="qa-tag gate">与「${ex.map(esc).join("」「")}」互斥</span>` : ""}
+              ${o.stats?.thenSwitch ? `<span class="qa-tag swi">结算后换组</span>` : ""}
               <span class="qa-tag ${AUTO[k].cls}">${AUTO[k].label}</span>
             </div>`;
           }).join("")}
