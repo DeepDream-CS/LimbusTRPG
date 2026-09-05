@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Limbus Company TRPG · 玩家记录器</title>
+<link rel="stylesheet" href="建卡器.css?v=64">
+</head>
+<body>
+<div class="app app-tracker">
+  <header class="top">
+    <div class="brand">
+      <h1>Limbus Company TRPG · 玩家记录器</h1>
+      <div class="sub">Card Tracker</div>
+      <a class="btn ghost btn-goto" href="index.html">← 建卡器</a>
+      <a class="btn ghost btn-reset" href="战斗器.html">⚔ 战斗计算器</a>
+      <a class="btn ghost btn-reset" href="鉴定器.html">🎲 鉴定器</a>
+      <a class="btn ghost btn-reset" href="题库.html">📖 题库</a>
+      <a class="btn ghost btn-reset" href="敌人制作器.html">👹 敌人制作器</a>
+    </div>
+    <div class="round-bar">
+      <span class="round-no">第 <b id="trRound">1</b> 回合</span>
+      <button class="btn" id="btnNextRound">下一回合 →</button>
+      <button class="btn ghost" id="btnUndo">↶ 撤销</button>
+    </div>
+  </header>
+
+  <main class="stage">
+    <div class="card">
+      <h2 class="sec-head"><span id="trName">还没有导入角色</span>
+        <span>
+          <button class="btn" id="btnImport">⇩ 导入角色 JSON</button>
+          <button class="btn ghost mini" id="btnResetDeck">↺ 重置卡组</button>
+        </span></h2>
+      <input type="file" id="fileInput" accept=".json,application/json" hidden>
+      <p class="lead">用建卡器的「导出 JSON」得到文件，拖进这个页面或者点上面的按钮都行。
+        两组卡都能点，架势由你和 GM 自己把关。打出和弃掉都消耗卡组循环，整组用完就自动刷新。</p>
+      <div id="trVitals"></div>
+    </div>
+
+    <div id="trGroups"></div>
+
+    <div class="card" style="margin-top:20px">
+      <h2>出牌记录</h2>
+      <div id="trLog"><p class="empty">还没有出过牌。</p></div>
+    </div>
+  </main>
+</div>
+
+<div class="tr-drop" id="trDrop">松手即可导入角色卡</div>
+<div class="toast" id="toast"></div>
+<!-- 这一页只吃建卡器导出的 JSON，卡面文字都在里面，所以不引用 建卡器.js -->
+<script src="记录器.js?v=64"></script>
+</body>
+</html>

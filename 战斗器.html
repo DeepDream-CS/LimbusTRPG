@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Limbus Company TRPG · 战斗计算器</title>
-<link rel="stylesheet" href="建卡器.css?v=54">
+<link rel="stylesheet" href="建卡器.css?v=64">
 </head>
 <body>
 <div class="app app-combat">
@@ -15,6 +15,8 @@
       <a class="btn ghost btn-goto" href="index.html">← 建卡器</a>
       <a class="btn ghost btn-reset" href="鉴定器.html">🎲 鉴定器</a>
       <a class="btn ghost btn-reset" href="题库.html">📖 题库</a>
+      <a class="btn ghost btn-reset" href="记录器.html">🗂 记录器</a>
+      <a class="btn ghost btn-reset" href="敌人制作器.html">👹 敌人制作器</a>
     </div>
     <div class="round-bar">
       <span class="round-no">第 <b id="roundNo">1</b> 回合</span>
@@ -42,7 +44,7 @@
     <!-- 聚光灯：出牌与接线都在这里 -->
     <div class="card" id="spotCard">
       <h2>聚光灯</h2>
-      <p class="lead">按槽位出牌，卡片来自当前架势那一组。防御 / 援护 / 反击是接线卡——在自己的行动里主动打出，接下敌方某条攻击意图；和攻击一样占一个行动槽，防了就不能再动，每轮限接一次，接的那一击也可以是打向队友的。不借技能牌切换架势同样占一个行动槽；开局设定架势用角色卡上的 A/B 开关，那个是免费的。</p>
+      <p class="lead">按槽位出牌，卡片来自当前架势那一组。防御 / 援护 / 反击是接线卡，在自己的行动里主动打出，接下敌方某条攻击意图；和攻击一样占一个行动槽，防了就不能再动，每轮限接一次。防御与反击护自己，援护先选替谁挡。没有攻击可接时可以空防。不借技能牌切换架势同样占一个行动槽；开局设定架势用角色卡上的 A/B 开关，那个是免费的。</p>
       <div id="spotFlow"></div>
       <div id="spotPick"></div>
       <div id="spotBody"></div>
@@ -59,7 +61,7 @@
     <div class="card" id="deckCard" hidden style="margin-top:20px">
       <h2 class="sec-head"><span id="deckTitle">卡组</span>
         <button class="btn ghost mini" id="btnDeckClose">✕ 关闭</button></h2>
-      <p class="lead">问答特效里的「弃掉 N 张」是自然语言，只能手动执行——在这里点「弃掉」即可。弃牌与打出一样消耗卡组循环。</p>
+      <p class="lead">问答特效里的「弃掉 N 张」是自然语言，只能手动执行，在这里点「弃掉」即可。弃牌与打出一样消耗卡组循环。</p>
       <div id="deckBody"></div>
     </div>
 
@@ -71,6 +73,6 @@
 </div>
 
 <div class="toast" id="toast"></div>
-<script src="战斗器.js?v=54"></script>
+<script src="战斗器.js?v=64"></script>
 </body>
 </html>

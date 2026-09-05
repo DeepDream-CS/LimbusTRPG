@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Limbus Company TRPG · 敌人制作器</title>
+<link rel="stylesheet" href="建卡器.css?v=64">
+</head>
+<body>
+<div class="app app-foemaker">
+  <header class="top">
+    <div class="brand">
+      <h1>Limbus Company TRPG · 敌人制作器</h1>
+      <div class="sub">Foe Maker</div>
+      <a class="btn ghost btn-goto" href="index.html">← 建卡器</a>
+      <a class="btn ghost btn-reset" href="战斗器.html">⚔ 战斗计算器</a>
+      <a class="btn ghost btn-reset" href="题库.html">📖 题库</a>
+      <a class="btn ghost btn-reset" href="记录器.html">🗂 记录器</a>
+    </div>
+    <div class="round-bar">
+      <span class="round-tally" id="fmCount"></span>
+      <button class="btn" id="btnAdd">＋ 新增敌人</button>
+      <button class="btn" id="btnExport">⬇ 导出 JSON</button>
+      <button class="btn ghost" id="btnImport">⇩ 导入</button>
+      <button class="btn ghost" id="btnClear">↺ 全部清空</button>
+    </div>
+  </header>
+
+  <main class="stage">
+    <div class="card">
+      <h2>遭遇编辑</h2>
+      <p class="lead">一个文件就是一场遭遇，可以放多个敌人。做好之后导出 JSON，在战斗计算器里用「导入角色」那个按钮读进去，
+        它同时认角色卡和敌人卡。战斗器里现场捏敌人的路子不受影响，那边捏出来的就是一个全 1 抗性、没有被动的普通敌人。</p>
+      <div class="attr-help">
+        <b>抗性系数：</b> 1 是正常，小于 1 抗，大于 1 是弱点，0 及以下免疫。乘完<b>向上取整</b>，所以系数只要大于 0，这一击至少还剩 1 点。
+        <br>攻击模式与罪孽<b>两维相乘</b>。一个既抗斩击 0.5 又抗暴怒 0.5 的敌人，挨暴怒的斩击卡只吃 0.25 倍。
+        <br><b>被动：</b> 五类模板，填数值即可，战斗器会在各自的时机自动结算。不填的字段不生效。
+      </div>
+      <div id="fmList"></div>
+    </div>
+  </main>
+</div>
+
+<input type="file" id="fileInput" accept=".json,application/json" hidden>
+<div class="toast" id="toast"></div>
+<!-- 引用建卡器只为了罪孽名与攻击模式名。它末尾的初始化以 #stageCard 为开关，
+     本页没有那个元素，所以只会留下数据表与纯函数 -->
+<script src="建卡器.js?v=64"></script>
+<script src="敌人制作器.js?v=64"></script>
+</body>
+</html>

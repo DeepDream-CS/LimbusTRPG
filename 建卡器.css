@@ -309,9 +309,19 @@ button:focus-visible,.subchip:focus-visible,.rdot:focus-visible,.dot:focus-visib
 /* ============ 战斗计算器 ============ */
 /* 单栏：场上单位固定在聚光灯上方，任何宽度下都不会被挤到日志后面 */
 .app-combat{max-width:1180px;grid-template-columns:1fr}
-.board{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+/* 我方与敌人上下两块，每块内部自己铺自适应网格。
+   以前是左右两栏各一条竖直堆叠，一边三个人一边一个敌人时另一边全是空白，
+   而且单位一多就只能一路往下滚。 */
+.board{display:flex;flex-direction:column;gap:16px;margin-bottom:20px}
 .board .card{padding:18px 20px}
-@media(max-width:900px){ .board{grid-template-columns:1fr} }
+/* 单位卡片默认折叠，所以 260px 一列足够；宽屏自动铺三到四列 */
+#players,#enemies{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;align-items:start}
+#players .unit,#enemies .unit{margin-bottom:0}
+#players>.empty,#enemies>.empty{grid-column:1/-1}
+/* 折叠态的一行摘要：这个单位本轮要干什么、抗什么，一眼看完 */
+.unit-brief{font-size:12px;color:var(--muted);margin-top:8px;line-height:1.5}
+.foe-kind{display:inline-block;margin-top:6px;font-size:11px;padding:1px 8px;border-radius:20px;
+  border:1px solid var(--line);color:var(--muted)}
 /* 战斗器没有 aside.summary，标题栏的 flex 规则要另外给 */
 .board h3.sec-head,.card h2.sec-head{display:flex;justify-content:space-between;align-items:center;gap:12px}
 .card h2.sec-head{margin:0 0 4px}
@@ -535,3 +545,70 @@ button:focus-visible,.subchip:focus-visible,.rdot:focus-visible,.dot:focus-visib
   border-radius:5px;font-size:11px;padding:3px 5px;font-family:inherit}
 .eff-in{flex:1;min-width:90px;background:#0e1016;border:1px solid var(--line);color:var(--text);
   border-radius:5px;padding:3px 7px;font-size:11px;font-family:inherit}
+
+/* ============ 玩家记录器（记录器.html 专用） ============
+   类名一律 .tr- 前缀，不与建卡器 / 鉴定器 / 战斗器 / 题库 的样式相交。 */
+.app-tracker{max-width:1180px;grid-template-columns:1fr}
+
+.tr-vitals{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+.tr-vital{display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  padding:8px 12px;background:#0e1016;border:1px solid var(--line);border-radius:10px}
+.tr-vlab{min-width:66px;font-size:13px;color:var(--muted)}
+.tr-vin{width:62px;background:#161923;border:1px solid var(--line);color:var(--accent-2);
+  border-radius:6px;padding:4px 8px;font-size:15px;font-weight:600;font-family:inherit;text-align:center}
+.tr-vmax{font-size:12px;color:var(--muted)}
+.tr-vnote{font-size:12px;color:var(--muted);margin-left:auto}
+.tr-panic{color:var(--danger)}
+
+.tr-group{margin-top:20px}
+.tr-count{font-size:13px;color:var(--accent-2);font-weight:600}
+.tr-count.full{color:var(--muted)}
+.tr-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(268px,1fr));gap:12px;margin-top:12px}
+.tr-card{background:#0e1016;border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.tr-card.tr-used{opacity:.4}
+.tr-chead{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+.tr-chead b{font-size:14px}
+.tr-lv{font-size:11px;color:var(--muted)}
+.tr-tag{font-size:11px;padding:1px 7px;border-radius:20px;
+  background:rgba(200,162,75,.14);border:1px solid var(--line);color:var(--accent-2)}
+.tr-tag.used{background:transparent;color:var(--muted)}
+.tr-tag.add{background:rgba(120,160,220,.14);color:#8fb4e0}
+.tr-eff{font-size:12.5px;color:var(--text);line-height:1.6}
+.tr-eff.sub{color:var(--muted);font-size:12px}
+.tr-acts{display:flex;gap:8px;margin-top:10px}
+
+.tr-lround{font-size:12px;color:var(--accent-2);font-weight:600;margin:12px 0 4px}
+.tr-lround:first-child{margin-top:0}
+.tr-lrow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  padding:6px 10px;border-bottom:1px solid var(--line);font-size:13px}
+.tr-lkind{font-size:11px;padding:1px 8px;border-radius:20px;border:1px solid var(--line)}
+.tr-lkind.play{background:rgba(200,162,75,.16);color:var(--accent-2)}
+.tr-lkind.discard{color:var(--muted)}
+.tr-lname{font-weight:600}
+.tr-lgid{font-size:11px;color:var(--muted)}
+.tr-lnote{font-size:11.5px;color:var(--muted);margin-left:auto}
+.tr-lnote.refresh{color:var(--accent-2)}
+
+/* 拖拽提示：平时不占位，拖着文件进页面时才铺开 */
+.tr-drop{position:fixed;inset:0;display:none;align-items:center;justify-content:center;
+  background:rgba(10,11,15,.86);border:2px dashed var(--accent-2);z-index:60;
+  font-size:18px;color:var(--accent-2);pointer-events:none}
+.tr-drop.on{display:flex}
+
+/* ============ 敌人制作器（敌人制作器.html 专用） ============
+   类名一律 .fm- 前缀。复用了战斗器的 .unit-stats / .ustat / .intents / .kind-pick，
+   那几个是纯布局，改它们要同时看战斗器。 */
+.app-foemaker{max-width:1180px;grid-template-columns:1fr}
+.fm-foe{margin-top:16px;padding:18px 20px}
+.fm-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.fm-head .name-input{flex:1;min-width:140px}
+.fm-sec{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+.fm-sec h4{margin:0 0 10px;font-size:14px;color:var(--accent-2);display:flex;align-items:center;gap:10px}
+.fm-sub{font-size:11px;color:var(--muted);margin:10px 0 4px;letter-spacing:.5px}
+.fm-add{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.fm-passive{background:#0e1016;border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px}
+.fm-phead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px}
+.fm-phead .eff-in{flex:1;min-width:120px}
+.fm-flags{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px}
+.fm-flag{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted);cursor:pointer}
+.fm-flag input{accent-color:var(--accent)}

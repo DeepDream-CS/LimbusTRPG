@@ -7,7 +7,9 @@
      攻击   伤害 = 基础伤害 + 差值；攻击意图被拼过一次就结算，无论我方成败
      接线   防御/援护/反击在自己的行动里主动打出，接下敌方某条攻击意图。
             占一个行动槽，防御就是这一槽的行动，防完不能再出牌。
-            每轮仍限接一次。接的那一击不必打向自己，叙事上就是替别人挡下来。
+            每轮仍限接一次。防御与反击护的是自己，援护先选一名友方替他挡。
+            敌方意图不带「打向」，挨打的是谁在接线或落地那一刻才定。
+            没有攻击可接时接线卡仍可打出，叫空防，只兑现恢复与免费切架势。
             和其他卡一样只能从当前架势那一组出，另一组的防御要先切过去。
      敌方攻击  没有独立的「敌方回合」。所有人都行动完、仍有攻击意图没人接线时，
             这些意图自动落地：伤害 = 敌方基础伤害 + (意图值 - 体魄)，最低为 0
@@ -47,13 +49,33 @@ const pct = (x) => Math.round(x * 100) + "%";
 const d6 = () => 1 + Math.floor(Math.random() * 6);
 
 /* ---------- 导入 ---------- */
+/* 老角色卡兼容。问答的 stats 是**烘进导出 JSON** 的（建卡器 buildCardGroupExport 里
+   `stats: o.stats || null`），所以规则改了以后，早先导出的那些文件仍然带着旧字段。
+   v57 之前 cancel 只有 buff / debuff / any 三挡，「取消一个增益或减益意图」用的是 any；
+   后来为了让「蛮力」「无间断」能取消攻击意图，any 被改成「连攻击意图一起」，
+   于是老文件里的忧郁「沉重」、嫉妒「毁掉」跟着变宽，一张普通攻击就能抹掉敌方的攻击意图。
+
+   靠结构认出这两条，不看中文：顶层 cancel 且带 onHit 的只有它们。
+   「无间断」走 cond.allHit 没有 onHit，「蛮力」在 win 分支里不是顶层。
+   角色卡重新导出一次就不再需要这段，留着是为了让牌桌上正在用的旧文件也对。 */
+let cancelFixed = 0;
+function migrateOldStats(card) {
+  for (const q of card.qa || []) {
+    const st = q.stats;
+    if (st?.onHit && st.cancel?.kind === "any") { st.cancel = { ...st.cancel, kind: "status" }; cancelFixed++; }
+  }
+  return card;
+}
+
 function playerFromJson(d) {
   const groups = {};
+  cancelFixed = 0;
   for (const gid of ["a", "b"]) {
     const src = d.罪孽卡片?.[gid] || {};
     groups[gid] = {
       mode: d.攻击模式?.[gid.toUpperCase() + "组"] || null,
-      cards: Object.values(src).filter(c => c.trait).map(c => ({ ...c, uid: uid() })),
+      cards: Object.values(src).filter(c => c.trait)
+        .map(c => migrateOldStats({ ...c, uid: uid() })),
       used: []
     };
   }
@@ -132,7 +154,7 @@ function addExtraCard(g, card) {
     baseDamage: null, hits: 1, clashAttr: card.clashAttr, stats: null,
     noMarginDamage: !!card.noMarginDamage,   // 追加卡跟母卡同一个罪孽，口径要一致
     effects: [card.extraCard.effect].concat(card.extraCard.granted
-      ? [`${card.extraCard.granted.label}——${card.extraCard.granted.effect}`] : []),
+      ? [`${card.extraCard.granted.label}　${card.extraCard.granted.effect}`] : []),
     extraCard: null, addedBy: card.sinLabel + "·多重攻击"
   };
   // 追加卡的基础伤害写在 effect 文本里（"基础伤害 N + 差值"），取出来供计算用
@@ -168,6 +190,10 @@ const activePlayers = () => state.players.filter(p => !downed(p));
 
 function reapDefeated() {
   const lines = [];
+  // 血线触发放在清场之前：这里是「一步操作全部结算完」的统一出口，
+  // 一处就能覆盖所有掉血路径，不必在 damageFoe 的每个调用点各判一次。
+  // 已经倒下的不再触发，濒死回血那种要靠 threshold 自己把 HP 拉回来才有意义。
+  state.enemies.forEach(e => { if (e.hp > 0) lines.push(...fireThresholds(e)); });
   const dead = state.enemies.filter(e => e.hp <= 0);
   if (dead.length) {
     state.enemies = state.enemies.filter(e => e.hp > 0);
@@ -183,16 +209,6 @@ function reapDefeated() {
   }
   const spot = state.players.find(x => x.id === state.spot);
   if (spot && downed(spot)) { state.spot = null; pending = null; }
-  // 打向已倒下的人的意图要改指还站着的，否则会卡在无法结算的目标上
-  const alive = activePlayers();
-  state.enemies.forEach(e => e.intents.forEach(i => {
-    if (i.type !== "attack" || !i.targetId) return;
-    const t = state.players.find(x => x.id === i.targetId);
-    if (t && downed(t)) {
-      i.targetId = alive.length ? alive[0].id : null;
-      if (alive.length) lines.push(`※ ${e.name} 的攻击改指向 ${alive[0].name}`);
-    }
-  }));
   return lines;
 }
 
@@ -238,12 +254,39 @@ function clashParts(p, card) {
 const sumParts = (parts) => parts.reduce((a, b) => a + b.v, 0);
 const partsText = (parts) => parts.map(x => `${x.label}${x.v >= 0 ? "+" : ""}${x.v}`).join(" ");
 /* 本轮生效的意图值 = 基础值 + 手动修正 - 减益卡压下来的部分 */
-const intentValue = (e, i) => i.value + (e.clashMod || 0) - (e.roundIntentMod || 0);
+/* 意图值被压到负数没有意义：拼点侧本来就 Math.max(0, …) 夹过，
+   但界面会照着显示「意图值 -1」，看着像出了错。在源头夹住。 */
+const intentValue = (e, i) => Math.max(0, i.value + (e.clashMod || 0) - (e.roundIntentMod || 0));
 /* 敌方本轮实际打出的基础伤害：被「造成的伤害 -N」压过 */
 const foeDamageOut = (e, raw) => Math.max(0, raw - (e.roundDmgDealt || 0));
 
 /* ---------- 伤害与治疗（我方敌方通用） ---------- */
 /* 所有伤害先扣临时生命，再扣 HP */
+/* ---------- 敌人抗性 ----------
+   十个系数：三种攻击模式 + 七罪。1 正常，小于 1 抗，大于 1 弱点，0 免疫，负数吸收。
+   两维**相乘**，所以既抗斩击又抗暴怒的敌人吃 0.5 × 0.5 = 0.25。 */
+const RESIST_MODES = { slash: "斩击", strike: "打击", pierce: "突刺" };
+const RESIST_SINS = { wrath: "暴怒", lust: "色欲", sloth: "怠惰", gluttony: "暴食",
+                      gloom: "忧郁", pride: "傲慢", envy: "嫉妒" };
+const RESIST_KEYS = { ...RESIST_MODES, ...RESIST_SINS };
+const DEFAULT_RESIST = Object.fromEntries(Object.keys(RESIST_KEYS).map(k => [k, 1]));
+/* 老角色卡的攻击模式只导出了中文标签，没有键。按标签兜一下，新导出的直接有 键 */
+const MODE_KEY_BY_LABEL = { 斩击: "slash", 打击: "strike", 突刺: "pierce" };
+const modeKeyOf = (g) => g?.mode?.键 || MODE_KEY_BY_LABEL[g?.mode?.模式] || null;
+
+/* 这一击是什么打出来的。damageFoe 有 11 个调用点，与其挨个加参数，
+   不如照 cardHealMod 的老套路用一个模块级变量，playCard 开头设、两个出口清。 */
+let cardDmgSrc = null;                    // {mode, sin}
+const resistMul = (e, src) => {
+  if (!src || !e.resist) return 1;
+  const m = src.mode ? (e.resist[src.mode] ?? 1) : 1;
+  const n = src.sin ? (e.resist[src.sin] ?? 1) : 1;
+  return m * n;
+};
+/* 抗性摘要，只列不等于 1 的那些。折叠态的卡片和日志都用它 */
+const resistBrief = (e) => Object.entries(e.resist || {})
+  .filter(([, v]) => v !== 1).map(([k, v]) => `${RESIST_KEYS[k]}×${v}`).join(" ");
+
 function applyDamage(u, amount) {
   const dmg = Math.max(0, amount);
   const absorbed = Math.min(u.temp || 0, dmg);
@@ -265,10 +308,114 @@ function damagePlayer(p, amount) {
   return { ...r, cut };
 }
 /* 打敌人：先叠上它本轮「受到的伤害 +N」，再走通用扣血 */
+/* 伤害日志的尾注：抗性乘了多少、被动减了多少，不写出来 GM 只会看到一个对不上的数字 */
+const dmgWhy = (r) => [
+  r.bonus ? `本轮易伤 +${r.bonus}` : null,
+  r.mul !== 1 ? `抗性 ×${r.mul}` : null,
+  r.cut ? `被动减伤 -${r.cut}` : null,
+  r.absorbed ? `临时生命吸收 ${r.absorbed}` : null
+].filter(Boolean).join("，");
+
+/* ---------- 敌人被动 ----------
+   五类模板，每类是可填数值的壳，不写死单个技能。敌人制作器的界面也从这张表生成，
+   所以加一类要同时想清楚：参数长什么样、挂在哪个时机、日志怎么写。
+
+     roundStart  回合开始：回血 / 加临时生命 / 自动多挂一条攻击意图
+     damageCut   减伤：每次受伤固定 -flat，且单次不超过 cap
+     immune      免疫：cancel 打断与驱散 / intentDown 意图值削减 / dmgTakenUp 本轮易伤
+     threshold   血线触发：HP 首次跌到 atPct% 以下时给一次收益，靠 firedPassives 防重复
+     riposte     反弹：被我方拼赢时，对拼点者反弹 damage 点
+
+   全部挂在敌人身上，卡片那边一个字都不用改。 */
+const PASSIVE_KINDS = {
+  roundStart: { label: "回合开始", fields: ["heal", "temp", "addIntent"] },
+  damageCut:  { label: "减伤",     fields: ["flat", "cap"] },
+  immune:     { label: "免疫",     fields: ["cancel", "intentDown", "dmgTakenUp"] },
+  threshold:  { label: "血线触发", fields: ["atPct", "heal", "temp", "allIntentUp", "addIntent"] },
+  riposte:    { label: "反弹",     fields: ["damage"] }
+};
+const PASSIVE_FIELD_LABEL = {
+  heal: "恢复 HP", temp: "临时生命", addIntent: "多挂一条攻击意图（意图值）",
+  flat: "每次受伤 -", cap: "单次受伤上限",
+  cancel: "免疫打断与驱散", intentDown: "免疫意图值削减", dmgTakenUp: "免疫本轮易伤",
+  atPct: "触发血线 %", allIntentUp: "全部意图值 +", damage: "反弹伤害"
+};
+const passivesOf = (e, kind) => (e.passives || []).filter(x => x.kind === kind);
+const hasImmune = (e, what) => passivesOf(e, "immune").some(x => x[what]);
+/* 减伤：先减固定值，再夹单次上限。两个都填就都生效 */
+function damageCutOf(e, dmg) {
+  let out = dmg;
+  for (const p of passivesOf(e, "damageCut")) {
+    if (p.flat) out -= p.flat;
+    if (p.cap != null && p.cap !== "" && out > p.cap) out = p.cap;
+  }
+  return Math.max(0, dmg - Math.max(0, out));
+}
+/* 给敌人挂一条攻击意图，被动的 addIntent 用 */
+function addFoeIntent(e, value, note) {
+  const i = newIntent();
+  i.value = value; i.note = note || "";
+  e.intents.push(i);
+  return i;
+}
+/* 回合开始的被动。挂在 nextRound 里，清完本轮减益之后跑，
+   所以「侵蚀」那类禁疗只压得住当轮，压不到下一轮的回血。 */
+function roundStartPassives(e) {
+  const out = [];
+  for (const p of passivesOf(e, "roundStart")) {
+    const tag = `${esc(e.name)} 的被动「${esc(p.label || "回合开始")}」`;
+    if (p.heal) { const h = applyHeal(e, p.heal); if (h) out.push(`${tag}：恢复 ${h} HP（${e.hp}/${e.maxHp}）`); }
+    if (p.temp) { e.temp = (e.temp || 0) + p.temp; out.push(`${tag}：获得 ${p.temp} 点临时生命`); }
+    if (p.addIntent) { addFoeIntent(e, p.addIntent, "被动追加"); out.push(`${tag}：多挂一条意图值 ${p.addIntent} 的攻击意图`); }
+  }
+  return out;
+}
+
+/* 血线触发。只在跌破那一刻算一次，之后再掉血也不重复 */
+function fireThresholds(e) {
+  const out = [];
+  for (const p of passivesOf(e, "threshold")) {
+    if ((e.firedPassives || []).includes(p.id)) continue;
+    const line = Math.floor(e.maxHp * (p.atPct ?? 50) / 100);
+    if (e.hp > line) continue;
+    (e.firedPassives ||= []).push(p.id);
+    const tag = `${esc(e.name)} 的被动「${esc(p.label || "血线触发")}」`;
+    out.push(`${tag} 触发（HP 跌破 ${p.atPct ?? 50}%）`);
+    if (p.heal && foeCanHeal(e)) { const h = applyHeal(e, p.heal); if (h) out.push(`  ▸ ${esc(e.name)} 恢复 ${h} HP（${e.hp}/${e.maxHp}）`); }
+    if (p.temp && foeCanHeal(e)) { e.temp = (e.temp || 0) + p.temp; out.push(`  ▸ ${esc(e.name)} 获得 ${p.temp} 点临时生命`); }
+    if (p.allIntentUp) { e.intents.forEach(i => { if (i.type === "attack") i.value += p.allIntentUp; });
+      out.push(`  ▸ ${esc(e.name)} 所有攻击意图值 +${p.allIntentUp}`); }
+    if (p.addIntent) { addFoeIntent(e, p.addIntent, "被动追加"); out.push(`  ▸ ${esc(e.name)} 多出一条意图值 ${p.addIntent} 的攻击意图`); }
+  }
+  return out;
+}
+/* 反弹：我方拼赢它时挨的那一下。攻击命中与接线成功都算「拼赢」 */
+function ripostesOf(e, who) {
+  const out = [];
+  for (const p of passivesOf(e, "riposte")) {
+    if (!p.damage) continue;
+    const r = damagePlayer(who, p.damage);
+    out.push(`${esc(e.name)} 的被动「${esc(p.label || "反弹")}」：${esc(who.name)} 受到 ${r.dmg} 点反弹伤害${
+      r.absorbed ? `（临时生命吸收 ${r.absorbed}）` : ""}，剩余 ${who.hp}/${who.maxHp}`);
+  }
+  return out;
+}
+
+/* 取消不成功有两种原因，日志要分得开：敌人免疫，还是它真的没有可取消的意图。
+   混成一句「没有可取消的意图」会让 GM 以为工具漏算了。 */
+const cancelFailWhy = (units) =>
+  units.some(u => hasImmune(u, "cancel")) ? "对方免疫打断与驱散" : "没有可取消的意图";
+
+/* 打敌人的唯一入口。顺序：本轮易伤 → 抗性 → 减伤类被动 → 实际扣血。
+   抗性摆在易伤之后，是因为易伤是「这一轮它更脆」，抗性是「它天生就吃这种伤害少」，
+   后者该对最终数字生效。乘完**向上取整**，所以系数只要大于 0，这一击至少还有 1 点。 */
 function damageFoe(enemy, amount) {
   const bonus = enemy.roundDmgTaken || 0;
-  const r = applyDamage(enemy, amount + bonus);
-  return { ...r, bonus };
+  const mul = resistMul(enemy, cardDmgSrc);
+  const afterResist = Math.ceil((amount + bonus) * mul);
+  const cut = damageCutOf(enemy, afterResist);
+  const r = applyDamage(enemy, afterResist - cut);
+  return { ...r, bonus, mul, raw: amount + bonus, cut };
 }
 /* 敌人被「侵蚀」后本轮不能回血/加壳，所以治疗敌人也要走一道门 */
 const foeCanHeal = (e) => !e.roundNoHeal;
@@ -446,10 +593,16 @@ function applyQaStat(q, ctx, opts = {}) {
     if (st.damage) {
       // 敌我通用：打敌人要叠它本轮的易伤
       const r = state.enemies.includes(u) ? damageFoe(u, st.damage) : applyDamage(u, st.damage);
-      lines.push(`${u.name} 受到 ${r.dmg} 点伤害${r.absorbed ? `（临时生命吸收 ${r.absorbed}）` : ""}，剩余 ${u.hp}/${u.maxHp}`);
+      lines.push(`${u.name} 受到 ${r.dmg} 点伤害${dmgWhy(r) ? `（${dmgWhy(r)}）` : ""}，剩余 ${u.hp}/${u.maxHp}`);
     }
-    if (st.intentDown) { u.roundIntentMod = (u.roundIntentMod || 0) + st.intentDown; lines.push(`${u.name} 本轮意图值 -${st.intentDown}`); }
-    if (st.dmgTakenUp) { u.roundDmgTaken = (u.roundDmgTaken || 0) + st.dmgTakenUp; lines.push(`${u.name} 本轮受到的伤害 +${st.dmgTakenUp}`); }
+    if (st.intentDown) {
+      if (hasImmune(u, "intentDown")) lines.push(`${u.name} 免疫意图值削减，本条无效`);
+      else { u.roundIntentMod = (u.roundIntentMod || 0) + st.intentDown; lines.push(`${u.name} 本轮意图值 -${st.intentDown}`); }
+    }
+    if (st.dmgTakenUp) {
+      if (hasImmune(u, "dmgTakenUp")) lines.push(`${u.name} 免疫本轮易伤，本条无效`);
+      else { u.roundDmgTaken = (u.roundDmgTaken || 0) + st.dmgTakenUp; lines.push(`${u.name} 本轮受到的伤害 +${st.dmgTakenUp}`); }
+    }
     if (st.dmgDealtDown) { u.roundDmgDealt = (u.roundDmgDealt || 0) + st.dmgDealtDown; lines.push(`${u.name} 本轮造成的伤害 -${st.dmgDealtDown}`); }
     if (st.dmgTakenDown) { u.roundDmgDown = (u.roundDmgDown || 0) + st.dmgTakenDown; lines.push(`${u.name} 本轮受到的伤害 -${st.dmgTakenDown}`); }
     if (st.diceUp) { u.roundDice = (u.roundDice || 0) + st.diceUp; lines.push(`${u.name} 本轮拼点骰 +${st.diceUp}`); }
@@ -461,7 +614,9 @@ function applyQaStat(q, ctx, opts = {}) {
     if (st.noHeal) { u.roundNoHeal = true; lines.push(`${u.name} 本轮不能恢复 HP、不能获得临时生命`); }
     // 「燃烧」：回合结束才落地的灼烧，排进队列
     if (st.burn) {
-      (state.pendingEnd ||= []).push({ enemyId: u.id, damage: st.burn, label: q.label });
+      // src 一起存下：回合末结算时 playCard 早就退出了，cardDmgSrc 已经清空，
+      // 不带着走这份延时伤害就会绕过抗性
+      (state.pendingEnd ||= []).push({ enemyId: u.id, damage: st.burn, label: q.label, src: cardDmgSrc });
       lines.push(`${u.name} 被点燃：本轮结束时受到 ${st.burn} 点灼烧伤害`);
     }
     // 「不容置疑」：本轮该敌人不能再把意图指向打出者
@@ -487,7 +642,7 @@ function applyQaStat(q, ctx, opts = {}) {
       const i = liveAttackIntents(u)[0];
       if (!i) lines.push(`${u.name} 没有可改指的攻击意图`);
       else if (other) {
-        i.targetId = null; i.foeTarget = other.id;
+        i.foeTarget = other.id;
         i.note = `${i.note || ""}（被挑拨，改打 ${other.name}）`;
         i.value = Math.max(0, i.value - (st.tauntDown || 0));
         lines.push(`${u.name} 的一条攻击意图改为指向 ${other.name}${st.tauntDown ? `，意图值 -${st.tauntDown}` : ""}`);
@@ -503,19 +658,17 @@ function applyQaStat(q, ctx, opts = {}) {
     let done = 0;
     for (const u of units) {
       if (!u.intents) continue;
-      // want 为 any 时连攻击意图一起算——「无间断」要的是「所有尚未结算的意图」
-      const pool = (want === "any" ? u.intents.filter(i => !i.resolved)
-                                   : liveOtherIntents(u).filter(i => i.type === want));
+      const pool = cancelPool(u, want);
       const take = st.cancel.n === "all" ? pool.length : Math.min(st.cancel.n || 1, pool.length);
       for (let k = 0; k < take; k++) {
         pool[k].resolved = true; done++;
         lines.push(`取消 ${u.name} 的${INTENT_TYPES[pool[k].type].label}意图${pool[k].note ? `「${esc(pool[k].note)}」` : ""}`);
       }
     }
-    if (!done && !st.orElse) lines.push(`没有可取消的意图`);
+    if (!done && !st.orElse) lines.push(cancelFailWhy(units));
     // 一个都没取消到 → 走替代条款
     if (!done && st.orElse) {
-      lines.push(`没有可取消的意图，改为：`);
+      lines.push(`${cancelFailWhy(units)}，改为：`);
       const alt = applyQaStat({ label: q.label, stats: { scope: st.scope, ...st.orElse } }, ctx, opts);
       return lines.map(x => `  ▸ ${q.label}：${x}`).concat(alt);
     }
@@ -523,8 +676,10 @@ function applyQaStat(q, ctx, opts = {}) {
   // 我方状态槽：移除减益 / 把减益搬给敌人。units 这时是友方（scope 指向我方）
   if (st.cleanse || st.steal) {
     const stolen = [];
+    let looked = 0;                                // 真正看过几个有状态槽的对象
     for (const u of units) {
       if (!u.effects) continue;                    // 敌人没有状态槽，跳过
+      looked++;
       const gone = removeEffects(u, "debuff", st.cleanse || st.steal);
       if (gone.length) {
         lines.push(`${u.name} 移除 ${gone.length} 个减益：${gone.map(e => e.label || "减益").join("、")}`);
@@ -541,6 +696,9 @@ function applyQaStat(q, ctx, opts = {}) {
         lines.push(`转移到 ${foe.name} 身上，成为 ${stolen.length} 条减益意图`);
       } else lines.push(`（没有指定敌人，减益已移除但未转移）`);
     }
+    // 作用面整个落在敌人身上时，上面那个循环一次都不会进，整条会静默消失。
+    // 这类卡的 scope 该指向我方（selfAndAlly / allAllies / guarded），写错了要看得见
+    if (!looked) lines.push(`这一条作用在我方状态槽上，但作用面里没有我方角色，本条未结算`);
   }
   // 友方那一半：作用面与主 scope 不同，所以单开一组字段（「艳羡」打敌人的同时给友方加壳）
   if (st.allyScope) {
@@ -624,17 +782,40 @@ function applyAllQa(card, ctx, opts = {}) {
 /* ---------- 敌人与意图 ---------- */
 const INTENT_TYPES = {
   attack: { label: "攻击", desc: "可拼点；被拼过一次即结算，无论我方成败" },
-  buff: { label: "增益", desc: "敌方强化自身——用「意图修正」手动体现" },
-  debuff: { label: "减益", desc: "削弱我方——用角色的「拼点修正」手动体现" }
+  buff: { label: "增益", desc: "敌方强化自身，用「意图修正」手动体现" },
+  debuff: { label: "减益", desc: "削弱我方，用角色的「拼点修正」手动体现" }
 };
 const liveAttackIntents = (e) => e.intents.filter(i => i.type === "attack" && !i.resolved);
 /* 增益 / 减益意图：不能拼点，但可以被「打断 / 驱散」类效果取消掉 */
 const liveOtherIntents = (e) => e.intents.filter(i => i.type !== "attack" && !i.resolved);
+/* cancel.kind 的四挡。分错了后果很实际：卡面写「增益或减益意图」的条目
+   要是当成 any，一张普通攻击就能顺手抹掉敌方的攻击意图，等于白嫖一次格挡。
+     buff / debuff  只取那一种
+     status         增益或减益（卡面写「增益或减益意图」走这一挡）
+     any            真的全部，连攻击意图一起（「蛮力」「无间断」写的是「一个/所有意图」） */
+const cancelPool = (u, kind) =>
+    hasImmune(u, "cancel") ? []
+  : kind === "any" ? u.intents.filter(i => !i.resolved)
+  : kind === "status" ? liveOtherIntents(u)
+  : liveOtherIntents(u).filter(i => i.type === kind);
 const intentBrief = (e) => {
   const b = liveOtherIntents(e).filter(i => i.type === "buff").length;
   const d = liveOtherIntents(e).filter(i => i.type === "debuff").length;
   return [b ? `${b} 增益` : null, d ? `${d} 减益` : null].filter(Boolean).join(" · ");
 };
+
+/* 折叠态的一行摘要。人一多就没法把每张卡都摊开看，这一行要能替代展开：
+   还剩几条攻击意图、意图值多少、抗什么、带几条被动。 */
+function foeBrief(e) {
+  const atk = liveAttackIntents(e).map(i => intentValue(e, i));
+  const bits = [
+    atk.length ? `攻击意图 ${atk.join("、")}` : "没有攻击意图",
+    intentBrief(e) || null,
+    resistBrief(e) || null,
+    (e.passives || []).length ? `被动 ${e.passives.length}` : null
+  ].filter(Boolean);
+  return bits.join(" · ");
+}
 
 /* 敌方攻击的基础伤害是 XdY+Z，每次结算现掷。
    dmgN 个 dmgFaces 面骰，再加 dmgFlat 的固定值。 */
@@ -642,9 +823,27 @@ function newIntent() {
   return {
     id: uid(), type: "attack", value: 7,
     dmgN: 1, dmgFaces: 6, dmgFlat: 2,
-    note: "", resolved: false, targetId: null
+    note: "", resolved: false
   };
 }
+/* 敌人制作器导出的那份 JSON 进来。缺什么补什么，老文件与手捏的敌人共用同一套字段。
+   意图重新发 id，免得两个文件里的 id 撞上。 */
+function foeFromJson(d) {
+  const e = newEnemy();
+  e.name = d.name || e.name;
+  e.kind = FOE_KINDS[d.kind] ? d.kind : "mob";
+  e.maxHp = d.maxHp ?? e.maxHp;
+  e.hp = d.hp ?? e.maxHp;
+  e.temp = d.temp || 0;
+  e.resist = { ...DEFAULT_RESIST, ...(d.resist || {}) };
+  e.passives = (d.passives || []).map(p => ({ ...p, id: uid() }));
+  e.firedPassives = [];
+  e.intents = (d.intents || []).length
+    ? d.intents.map(i => ({ ...newIntent(), ...i, id: uid(), resolved: false }))
+    : [newIntent()];
+  return e;
+}
+
 const dmgSpec = (i) => `${i.dmgN}d${i.dmgFaces}${i.dmgFlat ? (i.dmgFlat > 0 ? "+" : "") + i.dmgFlat : ""}`;
 const dmgAvg = (i) => i.dmgN * (i.dmgFaces + 1) / 2 + i.dmgFlat;
 const dmgMin = (i) => i.dmgN + i.dmgFlat;
@@ -657,11 +856,11 @@ function rollDamage(i) {
 /* 掷骰过程写进日志，免得玩家不知道那个数字从哪来 */
 const dmgText = (i, r) => `${dmgSpec(i)} → [${r.rolls.join(", ")}]${i.dmgFlat ? `${i.dmgFlat > 0 ? "+" : ""}${i.dmgFlat}` : ""} = ${r.total}`;
 /* 敌人类型只影响一条规则：「挡下全部意图」对它生效到什么程度。
-   杂兵全挡 · 精英只挡打向同一目标的 · BOSS 免疫（退化成只挡被拼的那一条）。
+   杂兵全挡 · 精英再多挡一条 · BOSS 免疫（退化成只挡被拼的那一条）。
    HP / 意图值 / 伤害不受类型影响——那些本来就是 GM 手填的。 */
 const FOE_KINDS = {
   mob:   { label: "杂兵", blockAll: "all",  desc: "「挡下全部意图」全效：它本轮的攻击意图会被一并挡下" },
-  elite: { label: "精英", blockAll: "same", desc: "「挡下全部意图」只挡下打向同一目标的攻击" },
+  elite: { label: "精英", blockAll: "same", desc: "「挡下全部意图」除被拼的那条外再多挡一条" },
   boss:  { label: "BOSS", blockAll: "none", desc: "免疫「挡下全部意图」，防御只挡下被拼的那一条" }
 };
 
@@ -669,6 +868,11 @@ function newEnemy() {
   return {
     id: uid(), name: "敌人" + (state.enemies.length + 1), kind: "mob",
     maxHp: 20, hp: 20, temp: 0, clashMod: 0,
+    // 抗性系数：1 正常，小于 1 抗，大于 1 弱点，0 免疫，负数吸收。
+    // 攻击模式与罪孽两维**相乘**，一个既抗斩击又抗暴怒的敌人吃 0.5×0.5=0.25
+    resist: { ...DEFAULT_RESIST },
+    passives: [],          // 见 PASSIVE_KINDS
+    firedPassives: [],     // 阈值类只触发一次，记已触发的 passive id
     roundIntentMod: 0,     // 本轮被减益卡压低的意图值，回合结束清零
     roundDmgTaken: 0,      // 本轮受到的伤害 +N（「加深」一类）
     roundDmgDealt: 0,      // 本轮造成的伤害 -N（「力量」一类）
@@ -688,10 +892,10 @@ function resolveAttack({ card, mod, modeStats, enemy, intent, roll, bonusDamage 
   // 拼点强度换零方差——赢多赢少一个样。由建卡器按卡导出，战斗器不认罪孽名。
   const noMargin = !!card.noMarginDamage;
   if (!intent) {
-    // 单方面：自动命中，差值 = 拼点值（不吃差值的卡同样拿不到这一份）
-    const clashVal = roll + mod;
-    return { oneSided: true, hit: true, roll, clashVal, dc: null, margin: noMargin ? 0 : clashVal,
-             damage: Math.max(0, base + (noMargin ? 0 : clashVal) + bonusDamage) };
+    // 单方面：没有对抗的意图，也就没有差值。伤害 = 基础 + 卡面/分击调整。
+    // 拼点值仍然算出来显示，但不进伤害——没拼过的东西不该给收益。
+    return { oneSided: true, hit: true, roll, clashVal: roll + mod, dc: null, margin: 0,
+             damage: Math.max(0, base + bonusDamage) };
   }
   const dc = Math.max(0, intentValue(enemy, intent) - dcDown);
   const clashVal = roll + mod;
@@ -716,15 +920,38 @@ function marginTemp(unit, margin, per) {
 
 /* 「挡下全部意图」：防御压过攻击的唯一杠杆——攻击一次只消一条意图，这条能消一片。
    强度按敌人类型递减，BOSS 免疫，免得单体大敌被一张卡关掉整轮。 */
-function blockAllIntents(enemy, intent, target) {
+/* 意图不再带「打向」，精英那一档原本的「只挡打向同一目标的」就没有落点了，
+   改成「除被拼的那条外再多挡一条」。三档的梯度还在：杂兵全挡 · 精英多挡一条 · BOSS 免疫。 */
+const blockAllExtra = (enemy, intent) => {
   const mode = FOE_KINDS[enemy.kind || "mob"].blockAll;
-  if (mode === "none") return [`${esc(enemy.name)} 是 BOSS，只挡下被拼的这一条`];
-  const extra = liveAttackIntents(enemy).filter(i =>
-    i.id !== intent.id && (mode === "all" || i.targetId === target.id));
+  if (mode === "none") return null;
+  const rest = liveAttackIntents(enemy).filter(i => i.id !== intent.id);
+  return mode === "all" ? rest : rest.slice(0, 1);
+};
+function blockAllIntents(enemy, intent) {
+  const extra = blockAllExtra(enemy, intent);
+  if (!extra) return [`${esc(enemy.name)} 是 BOSS，只挡下被拼的这一条`];
   extra.forEach(i => { i.resolved = true; });
   if (!extra.length) return [`${esc(enemy.name)} 没有其他待结算的攻击意图`];
   return [`一并挡下 ${esc(enemy.name)} 的另外 ${extra.length} 条攻击意图（意图值 ${
-    extra.map(i => intentValue(enemy, i)).join("、")}）${mode === "same" ? "——精英只挡下打向同一目标的" : ""}`];
+    extra.map(i => intentValue(enemy, i)).join("、")}）`];
+}
+
+/* 空防：摆了架势但没有攻击落到你身上。不拼点，也就没有差值，
+   所以只兑现「恢复」和「免费切架势」这两类，差值转临时生命与反伤都拿不到。
+   它照样占掉行动槽、照样消耗这张卡，代价是实打实的。 */
+function emptyGuard(p, card) {
+  const st = statsOf(card), br = st?.win || {};
+  const lines = [`没有攻击落到 ${esc(p.name)} 身上，不拼点`];
+  if (br.heal) lines.push(healLine(p, br.heal));
+  for (const q of qaStats(card)) {
+    const w = q.stats.win;
+    if (w?.heal) lines.push(`  ▸ ${q.label}：${healLine(p, w.heal)}`);
+    if (w?.freeSwitch) lines.push(...setStance(p, otherStance(groupIdOfCard(p, card)), `  ▸ ${q.label}（免费，不占行动槽）`));
+  }
+  if (br.freeSwitch) lines.push(...setStance(p, otherStance(groupIdOfCard(p, card)), "免费切换架势"));
+  if (lines.length === 1) lines.push("这张卡在空防下没有可兑现的收益");
+  return lines;
 }
 
 /* ---------- 结算：接线 ----------
@@ -740,6 +967,8 @@ function resolveIntercept({ who, target, card, mod, enemy, intent, roll, dmgRoll
   const incoming = Math.max(0, base + (dc - clashVal));
   const lines = [];
   lines.push(`1D6=${roll} → 拼点值 ${clashVal} 对 意图值 ${dc} → ${win ? "接线成功" : "接线失败"}`);
+  // 接线拼赢同样算「被拼赢」，反弹落在接线的那个人身上
+  if (win) lines.push(...ripostesOf(enemy, who));
   if (!win) lines.push(`敌方基础伤害 ${dmgText(intent, dmgRoll)}${
     enemy.roundDmgDealt ? ` − 本轮削弱 ${enemy.roundDmgDealt} = ${base}` : ""}，加上差距 ${dc - clashVal} → ${incoming} 点`);
 
@@ -789,10 +1018,10 @@ function resolveIntercept({ who, target, card, mod, enemy, intent, roll, dmgRoll
     // 胜利侧的恢复：以前只有失败分支读 heal，防御「赢了什么都不给」有一半原因在这
     if (br.heal) lines.push(healLine(who, br.heal));
     if (br.tempPerMargin) lines.push(...marginTemp(who, margin, br.tempPerMargin));
-    if (br.blockAll) lines.push(...blockAllIntents(enemy, intent, target));
+    if (br.blockAll) lines.push(...blockAllIntents(enemy, intent));
     if (br.damage) {
       const r = damageFoe(enemy, br.damage);
-      lines.push(`对 ${esc(enemy.name)} 造成 ${r.dmg} 点伤害${r.bonus ? `（含本轮易伤 ${r.bonus}）` : ""}${r.absorbed ? `（临时生命吸收 ${r.absorbed}）` : ""}`);
+      lines.push(`对 ${esc(enemy.name)} 造成 ${r.dmg} 点伤害${dmgWhy(r) ? `（${dmgWhy(r)}）` : ""}${""}`);
     }
     if (br.damagePlusMargin) {
       const dmg = counterBase + margin;
@@ -823,7 +1052,7 @@ function resolveIntercept({ who, target, card, mod, enemy, intent, roll, dmgRoll
   for (const { label, br: qb } of qaBranch(card, win)) {
     if (qb.damage) {
       const r = damageFoe(enemy, qb.damage);
-      lines.push(`  ▸ ${label}：对 ${esc(enemy.name)} 造成 ${r.dmg} 点伤害${r.absorbed ? `（吸收 ${r.absorbed}）` : ""}`);
+      lines.push(`  ▸ ${label}：对 ${esc(enemy.name)} 造成 ${r.dmg} 点伤害${dmgWhy(r) ? `（${dmgWhy(r)}）` : ""}`);
     }
     // 「反压」「厚积薄发」：伤害按打出者当前临时生命算
     if (qb.damagePerTemp) {
@@ -842,13 +1071,12 @@ function resolveIntercept({ who, target, card, mod, enemy, intent, roll, dmgRoll
     if (qb.pressure) { victim.pressure = Math.max(0, (victim.pressure || 0) + qb.pressure); lines.push(`  ▸ ${label}：${esc(victim.name)} 罪孽压力 ${qb.pressure > 0 ? "+" : ""}${qb.pressure}`); }
     if (qb.cancel) {
       const qw = qb.cancel.kind || "any";
-      const pool = (qw === "any" ? enemy.intents.filter(i => !i.resolved)
-                                 : liveOtherIntents(enemy).filter(i => i.type === qw));
+      const pool = cancelPool(enemy, qw);
       const take = qb.cancel.n === "all" ? pool.length : Math.min(qb.cancel.n || 1, pool.length);
       for (let k = 0; k < take; k++) { pool[k].resolved = true; lines.push(`  ▸ ${label}：取消 ${esc(enemy.name)} 的${INTENT_TYPES[pool[k].type].label}意图`); }
       if (!take && qb.orElse?.dmgTakenUp) {
         enemy.roundDmgTaken = (enemy.roundDmgTaken || 0) + qb.orElse.dmgTakenUp;
-        lines.push(`  ▸ ${label}：没有可取消的意图，改为 ${esc(enemy.name)} 本轮受到的伤害 +${qb.orElse.dmgTakenUp}`);
+        lines.push(`  ▸ ${label}：${cancelFailWhy([enemy])}，改为 ${esc(enemy.name)} 本轮受到的伤害 +${qb.orElse.dmgTakenUp}`);
       }
     }
     if (qb.diceUp) { victim.roundDice = (victim.roundDice || 0) + qb.diceUp; lines.push(`  ▸ ${label}：${esc(victim.name)} 本轮拼点骰 +${qb.diceUp}`); }
@@ -867,7 +1095,7 @@ function resolveIntercept({ who, target, card, mod, enemy, intent, roll, dmgRoll
       }
     }
     if (qb.tempPerMargin) lines.push(...marginTemp(victim, margin, qb.tempPerMargin).map(x => `  ▸ ${label}：${x}`));
-    if (qb.blockAll) lines.push(...blockAllIntents(enemy, intent, target).map(x => `  ▸ ${label}：${x}`));
+    if (qb.blockAll) lines.push(...blockAllIntents(enemy, intent).map(x => `  ▸ ${label}：${x}`));
     // 「你可以免费切换攻击模式」：这里按切处理，不想切就用角色卡上的免费开关翻回去
     if (qb.freeSwitch) lines.push(...setStance(who, otherStance(who.stance), `  ▸ ${label}（免费，不占行动槽）`));
   }
@@ -935,10 +1163,11 @@ function renderPlayers() {
           downed(p) ? "已倒下" : acted ? `已行动 ${p.slotUsed}/${p.slotCount}` : "待行动"}</span>
       </div>
       ${hpBar(p.hp, p.maxHp, p.temp)}
+      ${open ? `
       <div class="stance-pick" title="免费切换：开局设定与 GM 纠正用。正式的切换行动在聚光灯里，要花一个行动槽">
         ${["a", "b"].map(gid => `<button class="st-btn${p.stance === gid ? " on" : ""}" data-stance-free="${gid}" data-id="${p.id}">
           ${gid.toUpperCase()}组 · ${esc(modeName(p, gid))}</button>`).join("")}
-      </div>
+      </div>` : ""}
       <div class="unit-flags">
         ${pen ? `<span class="ptag warn">混乱线 拼点骰${pen}</span>` : ""}
         ${p.roundDice ? `<span class="ptag">本轮拼点骰 +${p.roundDice}</span>` : ""}
@@ -952,16 +1181,17 @@ function renderPlayers() {
             e.dmgDown ? ` 减伤${e.dmgDown}` : ""}${e.lasting ? " ∞" : ""}
           <button class="eff-x" data-effdel="${e.id}" data-id="${p.id}" title="移除">✕</button></span>`).join("")}
       </div>` : ""}
+      ${open ? `
       <div class="unit-stats">
         ${numField("HP", "pf", p.id, "hp", p.hp)}
         ${numField("临时生命", "pf", p.id, "temp", p.temp)}
         ${numField(`压力 / ${p.pressureCap}`, "pf", p.id, "pressure", p.pressure)}
-      </div>
+      </div>` : `<div class="unit-brief">${p.stance.toUpperCase()}组 ${esc(modeName(p, p.stance))} · 压力 ${p.pressure}/${p.pressureCap}</div>`}
       <div class="unit-foot">
         <span class="unit-deck">${["a", "b"].map(g =>
       `${g.toUpperCase()}组 ${availableCards(p.groups[g]).length}/${p.groups[g].cards.length} 张`).join(" · ")}</span>
         <button class="btn ghost mini" data-deck="${p.id}">🂠 卡组</button>
-        <button class="btn ghost mini" data-adv="${p.id}">${open ? "⚙ 收起" : "⚙ 调整"}</button>
+        <button class="btn ghost mini" data-adv="${p.id}">${open ? "▲ 收起" : "▼ 展开"}</button>
       </div>
       ${open ? `
       <div class="unit-adv">
@@ -983,7 +1213,7 @@ function renderPlayers() {
           <label class="ilab"><input type="checkbox" data-effnew="lasting" data-id="${p.id}">持续</label>
           <button class="btn ghost mini" data-effadd="${p.id}">＋ 添加</button>
         </div>
-        <p class="hint">状态自带数值，会自动算进拼点与减伤——不要再往上面的「拼点修正」重复填。
+        <p class="hint">状态自带数值，会自动算进拼点与减伤，不要再往上面的「拼点修正」重复填。
           不勾「持续」的状态在回合结束时自动消失；勾了的会一直留着，等「涤净」这类卡来解。</p>
       </div>` : ""}
     </div>`;
@@ -1076,8 +1306,6 @@ function renderEnemies() {
     $("enemies").innerHTML = `<p class="empty">尚未添加敌人。<br>点右上角「＋ 新增」，新敌人默认带一条攻击意图。</p>`;
     return;
   }
-  const playerOpts = (sel) => activePlayers().map(p =>
-    `<option value="${p.id}"${sel === p.id ? " selected" : ""}>${esc(p.name)}</option>`).join("");
   $("enemies").innerHTML = state.enemies.map((e, idx) => {
     const open = expanded.has(e.id);
     return `
@@ -1089,16 +1317,19 @@ function renderEnemies() {
         <button class="btn ghost mini" data-move="${e.id}" data-dir="1" ${idx === state.enemies.length - 1 ? "disabled" : ""} title="下移">↓</button>
         <button class="btn ghost mini" data-del="${e.id}" title="删除这个敌人">✕</button>
       </div>
+      ${open ? `
       <div class="kind-pick" title="${esc(FOE_KINDS[e.kind || "mob"].desc)}">
         ${Object.entries(FOE_KINDS).map(([k, v]) => `<button class="kd-btn${(e.kind || "mob") === k ? " on" : ""}"
           data-kind="${k}" data-id="${e.id}" title="${esc(v.desc)}">${v.label}</button>`).join("")}
-      </div>
+      </div>` : `<span class="foe-kind">${FOE_KINDS[e.kind || "mob"].label}</span>`}
       ${hpBar(e.hp, e.maxHp, e.temp, "foe")}
       ${(e.roundIntentMod || e.roundDmgTaken || e.roundDmgDealt) ? `<div class="unit-flags">
         ${e.roundIntentMod ? `<span class="ptag">本轮意图值 -${e.roundIntentMod}</span>` : ""}
         ${e.roundDmgTaken ? `<span class="ptag warn">本轮受到伤害 +${e.roundDmgTaken}</span>` : ""}
         ${e.roundDmgDealt ? `<span class="ptag dmg">本轮造成伤害 -${e.roundDmgDealt}</span>` : ""}
       </div>` : ""}
+      ${open ? "" : `<div class="unit-brief">${esc(foeBrief(e))}</div>`}
+      ${open ? `
       <div class="unit-stats">
         ${numField("HP", "ef", e.id, "hp", e.hp)}
         ${numField("上限", "ef", e.id, "maxHp", e.maxHp)}
@@ -1122,15 +1353,13 @@ function renderEnemies() {
               <button class="btn ghost mini" data-delint="${i.id}" data-eid="${e.id}">✕</button>
             </div>
             <div class="intent-row">
-              ${i.type === "attack" && state.players.length ? `<label class="ilab">打向
-                <select data-if="targetId" data-eid="${e.id}" data-iid="${i.id}">${playerOpts(i.targetId)}</select></label>` : ""}
               <input class="inote" data-if="note" data-eid="${e.id}" data-iid="${i.id}" value="${esc(i.note)}" placeholder="备注">
             </div>
-          </div>`).join("") || `<p class="hint">没有意图——我方攻击此敌人将是单方面攻击（自动命中，差值 = 拼点值）</p>`}
-      </div>
+          </div>`).join("") || `<p class="hint">没有意图，我方攻击此敌人只能是单方面攻击：自动命中，但没有差值，伤害只有基础加卡面调整</p>`}
+      </div>` : ""}
       <div class="unit-foot">
-        <button class="btn ghost mini" data-addint="${e.id}">＋ 意图</button>
-        <button class="btn ghost mini" data-adv="${e.id}">${open ? "⚙ 收起" : "⚙ 调整"}</button>
+        ${open ? `<button class="btn ghost mini" data-addint="${e.id}">＋ 意图</button>` : ""}
+        <button class="btn ghost mini" data-adv="${e.id}">${open ? "▲ 收起" : "▼ 展开"}</button>
       </div>
       ${open ? `
       <div class="unit-adv">
@@ -1139,7 +1368,7 @@ function renderEnemies() {
           ${numField("本轮受到伤害 +", "ef", e.id, "roundDmgTaken", e.roundDmgTaken || 0)}
           ${numField("本轮造成伤害 -", "ef", e.id, "roundDmgDealt", e.roundDmgDealt || 0)}
         </div>
-        <p class="hint">减益卡压下来的部分已自动计入，不用重复填。这三格是给工具还不认的来源用的——
+        <p class="hint">减益卡压下来的部分已自动计入，不用重复填。这三格是给工具还不认的来源用的，比如
           E.G.O 的「衰弱 / 余烬 / 燃尽」、【切换】类特效、以及你临场裁定的效果。三项都在回合结束时清零。</p>
       </div>` : ""}
     </div>`;
@@ -1194,16 +1423,16 @@ let pending = null;   // {playerId, cardUid, enemyId, intentId, allyId, discard:
 
 const FLOW_HINTS = {
   1: "点一张角色卡让他进入聚光灯。",
-  2: "挑一张卡打出。防御 / 援护 / 反击是接线卡——和攻击一样占一个行动槽，每轮限接一次。",
+  2: "挑一张卡打出。防御 / 援护 / 反击是接线卡，和攻击一样占一个行动槽，每轮限接一次。",
   attack3: "先选敌人，再选要对抗它的哪一条攻击意图。",
   attack4: "核对下方预览，然后投骰；也可以手填骰值代替随机。",
-  reaction3: "选一条要接下的敌方攻击。可以接打向自己的，也可以替别人挡下来。",
+  reaction3: "选一条要接下的敌方攻击。防御与反击护的是自己，援护先选替谁挡。没有攻击可接时可以空防。",
   reaction4: "核对成功率后投骰。接线要花掉这一个行动槽，接完就算行动过了。",
   ally3: "选一个受益者：自己或任意一名友方。",
   ally4: "确认收益后打出。这类卡不拼点，打出即生效。",
   foe3: "选一个要削弱的敌人。",
   foe4: "确认后打出。这类卡不拼点，打出即生效。",
-  self3: "勾选要弃掉的牌——弃牌会加速本组循环。",
+  self3: "勾选要弃掉的牌，弃牌会加速本组循环。",
   self4: "确认后打出。"
 };
 function flowLabels(kind) {
@@ -1224,7 +1453,8 @@ function spotStep() {
   if (!card) return 2;
   const kind = kindOf(card);
   if (kind === "attack") return shotsReady(card, sel) && extrasReady(card, sel) ? 4 : 3;
-  if (kind === "reaction") return sel.intentId ? 4 : 3;
+  if (kind === "reaction")
+    return sel.intentId && (sel.intentId === "none" || card.trait !== "shield" || sel.guardAllyId) ? 4 : 3;
   if (kind === "ally") return sel.allyId && extrasReady(card, sel) ? 4 : 3;
   if (kind === "foe") return sel.enemyId && extrasReady(card, sel) ? 4 : 3;
   // 凑不够时 discardNeed() 是 0（整条不发动、一张也不弃），否则这一步永远走不完
@@ -1289,9 +1519,17 @@ const discardMet = (p, card, sel) => {
   return want > 0 && (sel.discard || []).length >= want;
 };
 
+/* 候选为空时不能把整张卡卡死。场上只有一个敌人，带「相邻的一名敌人」的那一条
+   就是没有落点，但卡本身照样该打得出去——这一条不发动而已，和弃牌凑不够时
+   discardNeed() 返回 0 是同一个道理。 */
+const extraFoePool = (card, sel) => {
+  const anchor = state.enemies.find(e => e.id === sel.enemyId);
+  const adjOnly = qaStats(card).some(q => needsExtraFoe(q.stats)) && anchor;
+  return adjOnly ? adjacentFoes(anchor) : state.enemies.slice();
+};
 function extrasReady(card, sel) {
-  if (wantExtraFoe(card) && !sel.extraFoeId) return false;
-  if (wantExtraAlly(card) && !sel.extraAllyId) return false;
+  if (wantExtraFoe(card) && !sel.extraFoeId && extraFoePool(card, sel).length) return false;
+  if (wantExtraAlly(card) && !sel.extraAllyId && activePlayers().length) return false;
   const p = state.players.find(x => x.id === sel.playerId);
   if (p && extraDiscardNeed(card) && (sel.discard || []).length < discardNeed(p, card)) return false;
   return true;
@@ -1302,15 +1540,16 @@ function extraPickers(p, card, sel) {
   if (wantExtraFoe(card)) {
     const anchor = state.enemies.find(e => e.id === sel.enemyId);
     const adjOnly = qaStats(card).some(q => needsExtraFoe(q.stats)) && anchor;
-    const pool = adjOnly ? adjacentFoes(anchor) : state.enemies.slice();
-    html += `<div class="spot-sec"><h3>${adjOnly ? "选一名相邻的敌人" : "指定一名敌人"}${sel.extraFoeId ? "" : "（待选）"}</h3>
+    const pool = extraFoePool(card, sel);
+    html += `<div class="spot-sec"><h3>${adjOnly ? "选一名相邻的敌人" : "指定一名敌人"}${
+      pool.length ? (sel.extraFoeId ? "" : "（待选）") : ""}</h3>
       <p class="hint">${adjOnly ? "相邻 = 敌人列表里紧挨着的上下两个，可在上方用 ↑↓ 调整站位。"
         : "这张卡的问答特效指向敌人，但卡本身不打敌人，所以要单独指一个。"}</p>
       <div class="pick-row">${pool.map(e => `
         <div class="pick-unit${sel.extraFoeId === e.id ? " sel" : ""}" data-xfoe="${e.id}">
           <div class="pu-head"><b>${esc(e.name)}</b>
             <span class="pu-tag">意图 ${liveAttackIntents(e).map(i => intentValue(e, i)).join("、") || "—"}</span></div>
-        </div>`).join("") || `<p class="hint">目标上下都没有敌人，这一条无法结算。</p>`}</div></div>`;
+        </div>`).join("") || `<p class="hint">目标上下都没有敌人，这一条不发动。卡本身照常打出。</p>`}</div></div>`;
   }
   if (wantExtraAlly(card)) {
     html += `<div class="spot-sec"><h3>再指定一名友方${sel.extraAllyId ? "" : "（待选）"}</h3>
@@ -1333,14 +1572,14 @@ function discardPickBlock(p, card, sel, verb) {
   const wanted = discardWanted(card);
   return `
     <div class="spot-sec"><h3>${verb} ${wanted} 张${kind ? `${DISCARD_KIND_LABEL[kind]}的牌` : "牌"}（${picked.length} / ${wanted}）</h3>
-      ${kind ? `<p class="hint">这一条特效只限定弃哪一类，不增加弃牌张数——下面只列出${DISCARD_KIND_LABEL[kind]}的牌。</p>` : ""}
+      ${kind ? `<p class="hint">这一条特效只限定弃哪一类，不增加弃牌张数，下面只列出${DISCARD_KIND_LABEL[kind]}的牌。</p>` : ""}
       <div class="card-pick">${pool.map(c => `
         <div class="pick${picked.includes(c.uid) ? " sel" : ""}${need ? "" : " locked"}"${need ? ` data-disc="${c.uid}"` : ""}>
           <b>${esc(c.sinLabel)} · ${esc(c.traitLabel)}</b>
           <small>${esc(c.levelLabel)} · ${KIND_LABEL[kindOf(c)]}</small>
           <div class="pick-eff">${esc(c.effects[0] || "")}</div>
         </div>`).join("") || `<p class="hint">本组没有可弃的${kind ? DISCARD_KIND_LABEL[kind] + "的" : ""}牌了。</p>`}</div>
-      ${!need ? `<p class="hint" style="color:var(--danger)">可弃的牌只有 ${pool.length} 张，凑不够 ${wanted} 张——
+      ${!need ? `<p class="hint" style="color:var(--danger)">可弃的牌只有 ${pool.length} 张，凑不够 ${wanted} 张。
         弃牌是发动条件，<b>需要弃牌的那几条本次整条不发动</b>，也不会弃掉任何牌。
         本卡的伤害与其余不依赖弃牌的条目照常结算。</p>` : ""}
     </div>`;
@@ -1359,10 +1598,10 @@ function qaPreview(card) {
   if (!auto.length && !manual.length) return "";
   return `<div class="spot-preview note">
     ${auto.length ? `<b>问答特效（自动结算）</b>${auto.map(q =>
-      `<br>▸ ${esc(q.label)}——${esc(q.effect)} <span class="ptag${q.stats.partial ? " warn" : ""}">${
+      `<br>▸ ${esc(q.label)}　${esc(q.effect)} <span class="ptag${q.stats.partial ? " warn" : ""}">${
         q.stats.partial ? "部分自动，余下手动" : (SCOPE_LABEL[q.stats.scope] || "")}</span>`).join("")}` : ""}
     ${manual.length ? `${auto.length ? "<br><br>" : ""}<b>问答特效（需自行结算）</b>${manual.map(q =>
-      `<br>▸ ${esc(q.label)}——${esc(q.effect)}`).join("")}` : ""}
+      `<br>▸ ${esc(q.label)}　${esc(q.effect)}`).join("")}` : ""}
     ${swi ? `<br><br><span style="color:var(--accent-2)">⇄ 本卡带【切换】：结算完会自动换到另一组，不占行动槽</span>` : ""}
   </div>`;
 }
@@ -1453,9 +1692,9 @@ function renderSpot() {
     if (kindOf(c) === "reaction") {
       if (p.noDefenseRound === state.round) return "本轮已「精疲力竭」，打不出接线卡";
       if (p.interceptRound === state.round) return "本轮已接过线";
-      if (!liveIntents().length) return "当前没有敌方攻击意图可接";
-      if (c.trait === "shield" && !liveIntents().some(({ i }) => i.targetId !== p.id))
-        return "援护要替别人挡，当前没有打向他人的攻击";
+      // 没有攻击意图也能打，那是「空防」；援护则必须有个可护的人
+      if (c.trait === "shield" && !guardCandidates(p).length)
+        return "援护要替别人挡，场上没有别的角色";
       const st = statsOf(c), gg = p_group(p, c);
       const others = availableCards(gg).filter(x => x.uid !== c.uid);
       if (st?.require === "groupFull" && gg.used.length > 0) return "需本组所有卡片均未使用";
@@ -1468,7 +1707,7 @@ function renderSpot() {
   if (!card) {
     const shown = slotAvail;
     body = renderStancePick(p, sel) + `
-      <div class="spot-sec"><h3>${p.stance.toUpperCase()}组剩余 ${availableCards(g).length} / ${g.cards.length} 张${availableCards(g).length === 0 ? "——用完即刷新" : ""}</h3>
+      <div class="spot-sec"><h3>${p.stance.toUpperCase()}组剩余 ${availableCards(g).length} / ${g.cards.length} 张${availableCards(g).length === 0 ? "，用完即刷新" : ""}</h3>
         <div class="card-pick">${shown.map(c => {
           const k = kindOf(c), why = lockReason(c);
           const gid = groupIdOfCard(p, c);
@@ -1526,7 +1765,7 @@ function renderStancePick(p, sel) {
   const confirm = to ? `
     <div class="spot-preview" style="margin-top:10px">
       ${esc(p.name)} 换到 <b>${to.toUpperCase()}组 ${esc(modeName(p, to))}</b>，之后从这一组出牌
-      <br><span style="color:var(--accent-2)">消耗一个行动槽——切换后行动槽变为 ${p.slotUsed + 1}/${p.slotCount}${
+      <br><span style="color:var(--accent-2)">消耗一个行动槽，切换后行动槽变为 ${p.slotUsed + 1}/${p.slotCount}${
         p.slotUsed + 1 >= p.slotCount ? "，本回合行动结束" : ""}</span>
     </div>
     <div class="roll-row"><button class="btn primary big" id="btnStance">⇄ 切换架势（消耗一个行动槽）</button></div>` : "";
@@ -1584,7 +1823,7 @@ function renderAttackTarget(p, card, sel) {
           }).join("")}
           <div class="pick-unit narrow${s.intentId === null ? " sel" : ""}" data-intent="none" data-shot="${k}">
             <div class="pu-head"><b>单方面攻击</b></div>
-            <div class="pu-meta">不拼点，自动命中</div></div>
+            <div class="pu-meta">不拼点，自动命中，不计差值</div></div>
         </div>
       </div>`;
 
@@ -1615,14 +1854,11 @@ function renderAttackTarget(p, card, sel) {
         ${card.baseDamage != null ? `<br>命中伤害 ${fx || nm ? "=" : "≈"} <b>${(card.baseDamage + avgM + tc.damage + psm.damage + (ms?.winDamage || 0)).toFixed(fx || nm ? 0 : 1)}</b>（基础 ${card.baseDamage}${nm ? "" : " + 差值"}${tc.damage ? ` + 卡面${tc.damage}` : ""}${smTxt}${ms?.winDamage ? ` + ${p.groups[gid].mode.模式}${ms.winDamage}` : ""}${nm ? "，本卡不计差值" : ""}）` : ""}
         ${ms?.loseDamage ? `<br>未命中仍造成 <b>${ms.loseDamage}</b> 点（${p.groups[gid].mode.模式}模式保底）` : ""}`;
     } else {
-      const nm = !!card.noMarginDamage;
       const flat = Math.max(0, card.baseDamage + tc.damage + psm.damage);
-      preview = `${multi ? `<b>第 ${k + 1} 击</b> → ${esc(enemy.name)}<br>` : ""}<b>单方面攻击</b>——不投骰，自动命中${
-          nm ? "，<b>本卡不计差值</b>" : "，<b>差值 = 拼点值</b>"}
-        ${card.baseDamage != null ? `<br>${nm ? "伤害 = " : "期望伤害 ≈ "}<b>${
-          nm || multi ? flat : (flat + 3.5 + mod).toFixed(1)}</b>（基础 ${card.baseDamage}${
+      preview = `${multi ? `<b>第 ${k + 1} 击</b> → ${esc(enemy.name)}<br>` : ""}<b>单方面攻击</b>，不投骰自动命中
+        ${card.baseDamage != null ? `<br>伤害 = <b>${flat}</b>（基础 ${card.baseDamage}${
           tc.damage ? ` + 卡面${tc.damage}` : ""}${smTxt}）` : ""}
-        ${multi && !nm ? `<br><span style="color:var(--danger)">多重攻击不拼点的那一击不计差值</span>` : ""}`;
+        <br><span class="mute">没有对抗的意图就没有差值，这一击拿不到那一份。拼赢一条意图通常比这个高。</span>`;
     }
     return foeList + intentList + `<div class="spot-sec"><div class="spot-preview">${preview}</div></div>`;
   };
@@ -1656,62 +1892,97 @@ function interceptWinPreview(p, card, e, i, target, mod, dc) {
   // 「挡下全部意图」按敌人类型分流，把实际会多挡几条现算出来
   const all = qaStats(card).some(q => q.stats.win?.blockAll) || br.blockAll;
   if (all) {
-    const mode = FOE_KINDS[e.kind || "mob"].blockAll;
-    const extra = mode === "none" ? [] : liveAttackIntents(e).filter(x =>
-      x.id !== i.id && (mode === "all" || x.targetId === target?.id));
-    bits.push(mode === "none"
+    const extra = blockAllExtra(e, i);
+    bits.push(!extra
       ? `<span style="color:var(--danger)">${esc(e.name)} 是 BOSS，「挡下全部意图」无效</span>`
-      : `一并挡下另外 <b>${extra.length}</b> 条攻击意图${mode === "same" ? "（精英：只算打向同一目标的）" : ""}`);
+      : `一并挡下另外 <b>${extra.length}</b> 条攻击意图${
+          FOE_KINDS[e.kind || "mob"].blockAll === "same" ? "（精英最多再挡一条）" : ""}`);
   }
   return bits.length ? `<br>成功时：${bits.join(" · ")}` : "";
 }
 
-/* --- 接线：在自己的行动里主动接下敌方某条攻击，占掉这一个行动槽 --- */
+/* --- 接线：在自己的行动里主动接下敌方某条攻击，占掉这一个行动槽 ---
+   意图不再带「打向」，挨打的是谁在接线这一刻才定：
+     防御 / 反击  你护的是自己
+     援护          先选一名友方，你替他挡
+   另外任何接线卡都可以「空防」，不接任何攻击照样打出来（收益见 resolveIntercept）。 */
+function guardCandidates(p) { return activePlayers().filter(x => x.id !== p.id); }
+/* 接线时护着的那个人。援护是选中的友方，其余是自己 */
+function guardTargetOf(p, card, sel) {
+  if (card.trait !== "shield") return p;
+  return state.players.find(x => x.id === sel.guardAllyId) || null;
+}
+
 function renderInterceptTarget(p, card, sel) {
-  // 援护是「替友方挡」，只能接打向别人的；防御与反击接谁的都行
-  const pool = liveIntents().filter(({ e, i }) =>
-    (card.trait !== "shield" || i.targetId !== p.id) &&
-    !(e.noTarget || []).includes(i.targetId));   // 「不容置疑」禁掉的指向不再出现
-  if (!pool.length) {
-    return `<div class="foe-empty"><b>当前没有可接的攻击</b>
-      <p>${card.trait === "shield"
-        ? "援护要替别人挡下来，现在没有打向其他角色的攻击意图。"
-        : "敌方没有未结算的攻击意图。可以在上方「敌人」面板加一条，或先让别人行动。"}</p></div>`;
-  }
-  // 没设「打向」的意图接不了：接线失败时要有人挨那份伤害，挨打的是谁属于规则判断，
-  // 工具不替 GM 定。灰掉并写明原因，比让人一路走到投骰再静默失败好。
-  const chosen = pool.find(({ e, i }) => i.id === sel.intentId && i.targetId);
+  const isShield = card.trait === "shield";
+  const allies = guardCandidates(p);
+  /* 援护要先定替谁挡，之后才谈接哪一击 */
+  const allyPick = !isShield ? "" : `
+    <div class="spot-sec"><h3>替谁挡</h3>
+      <div class="pick-row">${allies.map(a => `
+        <div class="pick-unit narrow${sel.guardAllyId === a.id ? " sel" : ""}" data-guard="${a.id}">
+          <div class="pu-head"><b>${esc(a.name)}</b><span class="pu-tag">${a.hp}/${a.maxHp}${a.temp ? ` +${a.temp}` : ""}</span></div>
+        </div>`).join("") || `<p class="hint">场上没有别的角色，援护没有可护的对象。</p>`}</div>
+    </div>`;
+  const guarded = guardTargetOf(p, card, sel);
+  if (isShield && !guarded) return allyPick;
+
+  // 「不容置疑」：被禁的那个敌人本轮不能再把攻击落到 guarded 身上，也就无从接起
+  const pool = liveIntents().filter(({ e }) => !(e.noTarget || []).includes(guarded.id));
   const list = `
+    ${allyPick}
     <div class="spot-sec"><h3>接下哪一击</h3>
-      <div class="pick-row">${pool.map(({ e, i }) => {
-        const t = state.players.find(x => x.id === i.targetId);
-        const forSelf = i.targetId === p.id;
-        return `<div class="pick-unit${sel.intentId === i.id && t ? " sel" : ""}${t ? "" : " done"}"${t ? ` data-icept="${i.id}"` : ""}>
+      <div class="pick-row">${pool.map(({ e, i }) => `
+        <div class="pick-unit${sel.intentId === i.id ? " sel" : ""}" data-icept="${i.id}">
           <div class="pu-head"><b>${esc(e.name)}</b>
             <span class="pu-tag">意图值 ${intentValue(e, i)}</span></div>
-          <div class="pu-meta">基础伤害 ${dmgSpec(i)}（${dmgMin(i)}~${dmgMax(i)}） · 打向 <b>${t ? esc(t.name) : "未指定"}</b>
-            ${t ? (forSelf ? "（你自己）" : "（替他挡）") : "——先在上方「敌人」面板的「打向」里指一个角色"}${
-            i.note ? " · " + esc(i.note) : ""}</div>
-        </div>`;
-      }).join("")}</div>
+          <div class="pu-meta">基础伤害 ${dmgSpec(i)}（${dmgMin(i)}~${dmgMax(i)}）${i.note ? " · " + esc(i.note) : ""}</div>
+        </div>`).join("")}
+        <div class="pick-unit narrow${sel.intentId === "none" ? " sel" : ""}" data-icept="none">
+          <div class="pu-head"><b>空防</b></div>
+          <div class="pu-meta">不接任何攻击</div></div>
+      </div>
+      ${pool.length ? "" : `<p class="hint">敌方没有未结算的攻击意图，只能空防。</p>`}
     </div>`;
+
+  /* 空防：不拼点，只兑现恢复与切架势那一类，差值临时生命与反伤都拿不到 */
+  if (sel.intentId === "none") {
+    const st = statsOf(card), br = st?.win || {};
+    const gains = [];
+    if (br.heal) gains.push(`恢复 ${br.heal} HP`);
+    for (const q of qaStats(card)) {
+      if (q.stats.win?.heal) gains.push(`${q.label}：恢复 ${q.stats.win.heal} HP`);
+      if (q.stats.win?.freeSwitch) gains.push(`${q.label}：可免费切换攻击模式`);
+    }
+    if (br.freeSwitch) gains.push("可免费切换攻击模式");
+    return list + `
+      <div class="spot-sec"><div class="spot-preview">
+        <b>空防</b>：${esc(p.name)} 摆出架势，但没有攻击落到他身上，不拼点。
+        <br>${gains.length ? `兑现：${gains.join(" · ")}` : "这张卡在空防下没有可兑现的收益"}
+        <br><span class="mute">差值转临时生命、反伤、挡下意图都拿不到，没有拼点也就没有差值。</span>
+        <br><span style="color:var(--accent-2)">空防照样占掉这一个行动槽，也照样消耗这张卡。</span>
+      </div></div>
+      <div class="roll-row"><button class="btn primary big" id="btnGo">✔ 空防</button></div>`;
+  }
+
+  const chosen = pool.find(({ i }) => i.id === sel.intentId);
   if (!chosen) return list;
 
   const { e, i } = chosen;
-  const target = state.players.find(x => x.id === i.targetId);
+  const target = guarded;
   const parts = clashParts(p, card), mod = sumParts(parts);
   const dc = intentValue(e, i);
   return list + `
     <div class="spot-sec">
       <div class="spot-preview">
-        ${esc(p.name)} 接下 ${esc(e.name)} 打向 <b>${target ? esc(target.name) : "？"}</b> 的攻击
+        ${esc(p.name)} 接下 ${esc(e.name)} 的一击，护住 <b>${esc(target.name)}</b>
         <br>拼点值 = 1D6 + ${partsText(parts)} = 1D6 + ${mod} 对 意图值 ${dc}
         <br>成功率 <b>${pct(hitRate(mod, dc))}</b> · 成功时差值均值 ${avgMargin(mod, dc).toFixed(1)}
         ${interceptWinPreview(p, card, e, i, target, mod, dc)}
         <br>失败时伤害 = <b>${dmgSpec(i)}</b>（${foeDamageOut(e, dmgMin(i))}~${foeDamageOut(e, dmgMax(i))}${
           e.roundDmgDealt ? `，已计入本轮削弱 ${e.roundDmgDealt}` : ""}）+ (${dc} - 拼点值)${
           target && ((target.roundDmgDown || 0) + effDmgDown(target)) ? ` − ${esc(target.name)}减伤${(target.roundDmgDown || 0) + effDmgDown(target)}` : ""}，最低 0
-        <br><span style="color:var(--accent-2)">接线占掉这一个行动槽——结算后 ${esc(p.name)} 的行动槽变为 ${p.slotUsed + 1}/${p.slotCount}${
+        <br><span style="color:var(--accent-2)">接线占掉这一个行动槽，结算后 ${esc(p.name)} 的行动槽变为 ${p.slotUsed + 1}/${p.slotCount}${
           p.slotUsed + 1 >= p.slotCount ? "，本回合行动结束" : ""}</span>
       </div>
       <div class="roll-row">
@@ -1800,8 +2071,8 @@ function renderDiscardPick(p, card, sel) {
     <div class="spot-sec">
       <div class="spot-preview">${met
         ? `弃掉 <b>${picked.length}</b> 张牌，${esc(p.name)} 恢复 <b>${st.heal}</b> HP（问答特效的恢复另计）
-           <br>弃牌同样消耗卡组循环——${gid.toUpperCase()}组 用掉 ${picked.length + 1} 张后剩 ${Math.max(0, availableCards(g).length - picked.length - 1)} 张。`
-        : `凑不够 ${discardWanted(card)} 张，<b>不弃牌、基础恢复也不发动</b>——这张卡本次只会被消耗掉，
+           <br>弃牌同样消耗卡组循环，${gid.toUpperCase()}组 用掉 ${picked.length + 1} 张后剩 ${Math.max(0, availableCards(g).length - picked.length - 1)} 张。`
+        : `凑不够 ${discardWanted(card)} 张，<b>不弃牌、基础恢复也不发动</b>。这张卡本次只会被消耗掉，
            不依赖弃牌的问答条目照常结算。`}</div>
       <div class="roll-row"><button class="btn primary big" id="btnGo">✔ 打出</button></div>
     </div>`;
@@ -1869,7 +2140,10 @@ function bindSpot(p, card, sel, kind) {
     renderAll();
   });
   $("spotBody").querySelectorAll("[data-icept]").forEach(el => el.onclick = () => {
-    pending.intentId = +el.dataset.icept; renderAll();
+    pending.intentId = el.dataset.icept === "none" ? "none" : +el.dataset.icept; renderAll();
+  });
+  $("spotBody").querySelectorAll("[data-guard]").forEach(el => el.onclick = () => {
+    pending.guardAllyId = +el.dataset.guard; pending.intentId = null; renderAll();
   });
   $("spotBody").querySelectorAll("[data-ally]").forEach(el => el.onclick = () => {
     pending.allyId = +el.dataset.ally; renderAll();
@@ -1909,7 +2183,7 @@ function switchStance(p, gid) {
   if (!gid || p.stance === gid) return;
   const lines = setStance(p, gid, "主动切换");
   p.slotUsed++;
-  lines.push(`切换占一个行动槽——${p.name} 的行动槽 ${p.slotUsed}/${p.slotCount}${
+  lines.push(`切换占一个行动槽，${p.name} 的行动槽 ${p.slotUsed}/${p.slotCount}${
     playerDone(p) ? "，本回合行动结束" : ""}`);
   if (playerDone(p)) state.spot = null;
   pending = null;
@@ -1926,41 +2200,50 @@ function playCard(p, card, sel, kind) {
   const met = sel ? discardMet(p, card, sel) : false;
   // 本卡的恢复元修正（细嚼慢咽 / 微痛 / 暴食本能）——整张卡结算期间生效，末尾清掉
   cardHealMod = healModOf(card, { player: p });
+  // 这一击算什么伤害，敌人的抗性要按它查。跟着卡走：罪孽取卡片，攻击模式取卡所在那一组
+  cardDmgSrc = { mode: modeKeyOf(p.groups[gid]), sin: card.sin || null };
   let title = `【第${state.round}回合】${p.name} 打出「${card.sinLabel}·${card.traitLabel}(${card.levelLabel})」`;
 
   /* 接线：不走攻击那套伤害结算，单独收尾——写在最前面免得漏掉那条 return */
   if (kind === "reaction") {
-    // 意图可能在选中之后被别人拼掉、或压根没设「打向」。不拦住就会抛异常，
-    // 表现成「按钮点了没反应」——非常难查，所以这里给明确提示后退出。
-    const hit = liveIntents().find(x => x.i.id === sel.intentId);
-    const target = hit && state.players.find(x => x.id === hit.i.targetId);
-    if (!hit) { toast("这条攻击意图已经被结算掉了，请重新选一条"); pending = null; renderAll(); return; }
-    if (!target) { toast("这条意图还没设「打向」，先在「敌人」面板指一个角色"); return; }
-    const { e, i } = hit;
-    const manual = +$("manualRoll")?.value;
-    const parts = clashParts(p, card), tc = thisCardMods(card);
-    // 目前只有傲慢·攻击带 fixedRoll，但接线也走这条路——先接上，免得以后加了张接线卡静默失效
-    const roll = tc.fixedRoll ?? (manual >= 1 && manual <= 6 ? manual : d6());
-    const mod = sumParts(parts) + tc.dice;
-    title = `【第${state.round}回合】${p.name} 用「${card.sinLabel}·${card.traitLabel}」接下 ${e.name} 打向 ${target.name} 的攻击`;
-    lines.push(`拼点修正 ${partsText(parts)}${tc.dice ? ` 卡面+${tc.dice}` : ""} = +${mod}`);
-    lines.push(...resolveIntercept({
-      who: p, target, card, mod, enemy: e, intent: i, roll,
-      dmgRoll: rollDamage(i), dcDown: tc.intentDown
-    }).lines);
-    p.interceptRound = state.round;
-    i.resolved = true;
+    const target = guardTargetOf(p, card, sel);
+    if (!target) { toast("先选一名要替他挡的友方"); return; }
+    if (sel.intentId === "none") {
+      // 空防：没有攻击落下来，不拼点。只兑现恢复与切架势，差值临时生命与反伤都拿不到
+      title = `【第${state.round}回合】${p.name} 空防（打出「${card.sinLabel}·${card.traitLabel}」，没有攻击可接）`;
+      lines.push(...emptyGuard(p, card));
+      p.interceptRound = state.round;
+    } else {
+      // 意图可能在选中之后被别人拼掉。不拦住就会抛异常，表现成「按钮点了没反应」，非常难查
+      const hit = liveIntents().find(x => x.i.id === sel.intentId);
+      if (!hit) { toast("这条攻击意图已经被结算掉了，请重新选一条"); pending = null; renderAll(); return; }
+      const { e, i } = hit;
+      const manual = +$("manualRoll")?.value;
+      const parts = clashParts(p, card), tc = thisCardMods(card);
+      // 目前只有傲慢·攻击带 fixedRoll，但接线也走这条路，先接上免得以后加了张接线卡静默失效
+      const roll = tc.fixedRoll ?? (manual >= 1 && manual <= 6 ? manual : d6());
+      const mod = sumParts(parts) + tc.dice;
+      title = `【第${state.round}回合】${p.name} 用「${card.sinLabel}·${card.traitLabel}」接下 ${e.name} 的一击${
+        target === p ? "" : `，护住 ${target.name}`}`;
+      lines.push(`拼点修正 ${partsText(parts)}${tc.dice ? ` 卡面+${tc.dice}` : ""} = +${mod}`);
+      lines.push(...resolveIntercept({
+        who: p, target, card, mod, enemy: e, intent: i, roll,
+        dmgRoll: rollDamage(i), dcDown: tc.intentDown
+      }).lines);
+      p.interceptRound = state.round;
+      i.resolved = true;
+    }
     const refreshed = consumeCard(g, card);
     if (refreshed) lines.push(`※ ${gid.toUpperCase()}组已用完，卡组刷新`);
     lines.push(`${gid.toUpperCase()}组 剩余 ${availableCards(g).length}/${g.cards.length} 张`);
     // 防御就是这一槽的行动，和攻击一样吃掉槽位，防完不能再动
     p.slotUsed++;
-    lines.push(`接线占一个行动槽——${p.name} 的行动槽 ${p.slotUsed}/${p.slotCount}${
+    lines.push(`接线占一个行动槽，${p.name} 的行动槽 ${p.slotUsed}/${p.slotCount}${
       playerDone(p) ? "，本回合行动结束" : ""}`);
     if (playerDone(p)) state.spot = null;
     lines.push(...reapDefeated());
     pending = null;
-    cardHealMod = 0;
+    cardHealMod = 0; cardDmgSrc = null;
     pushLog(title, lines);
     renderAll();
     return;
@@ -1979,6 +2262,7 @@ function playCard(p, card, sel, kind) {
     const mod = sumParts(parts) + tc.dice;
     const ms = g.mode?.数值 || null;
     let anyHit = false, killedAny = false, toPanic = false, firstShotHit = null, allShotsHit = true;
+    const riposte = [];   // 敌人「被拼赢时反弹」的被动，逐击收集，结算完一起写进日志
     const tally = new Map();   // 敌人 id → 本卡累计伤害，多重攻击可能打在不同目标上
     if (tc.dice || tc.damage || tc.intentDown) {
       lines.push(`卡面本次修正：${[tc.dice ? `拼点骰 +${tc.dice}` : null,
@@ -2003,11 +2287,11 @@ function playCard(p, card, sel, kind) {
       }
       const r = resolveAttack({ card, mod: shotMod, modeStats: ms, enemy, intent, roll,
         bonusDamage: tc.damage + sm.damage, dcDown: tc.intentDown });
-      let dmg = r.damage;
-      // 单方面那一击不计差值，但卡面与分击的加伤照算——原来漏了 sm.damage
-      if (shots.length > 1 && r.oneSided) dmg = Math.max(0, (card.baseDamage ?? 0) + tc.damage + sm.damage);
+      const dmg = r.damage;
       tally.set(enemy.id, (tally.get(enemy.id) || 0) + dmg);
       if (r.hit) anyHit = true; else allShotsHit = false;
+      // 「被拼赢时反弹」：单方面是自动命中不是拼赢，不触发。多重攻击每拼赢一次算一次
+      if (r.hit && !r.oneSided) riposte.push(...ripostesOf(enemy, p));
       if (h === 0) firstShotHit = r.hit;
       // 「贪得无厌」「怒不可遏」要知道这一击把目标打成了什么样（合计伤害稍后才落地，先预判）
       if (r.hit && dmg > 0) {
@@ -2025,9 +2309,9 @@ function playCard(p, card, sel, kind) {
       const enemy = state.enemies.find(e => e.id === eid);
       const r = damageFoe(enemy, total);
       totalDealt += r.dmg;
-      lines.push(`${enemy.name} 合计承受 ${r.bonus ? `${total} + 本轮易伤 ${r.bonus} = ${r.dmg}` : r.dmg}${
-        r.absorbed ? `（临时生命吸收 ${r.absorbed}）` : ""}，剩余 ${enemy.hp}/${enemy.maxHp}`);
+      lines.push(`${enemy.name} 合计承受 ${r.dmg}${dmgWhy(r) ? `（${dmgWhy(r)}）` : ""}，剩余 ${enemy.hp}/${enemy.maxHp}`);
     }
+    lines.push(...riposte);
     const hitNames = [...tally.keys()].map(id => state.enemies.find(e => e.id === id)?.name).filter(Boolean);
     title += ` 攻击 ${hitNames.join("、")}`;
     const added = card.hits > 1 ? addExtraCard(g, card) : null;
@@ -2061,8 +2345,11 @@ function playCard(p, card, sel, kind) {
     const e = state.enemies.find(x => x.id === sel.enemyId), st = statsOf(card);
     title += ` → ${e.name}`;
     if (st?.intentDown) {
-      e.roundIntentMod = (e.roundIntentMod || 0) + st.intentDown;
-      lines.push(`基础：${e.name} 本轮所有意图值 -${st.intentDown}`);
+      if (hasImmune(e, "intentDown")) lines.push(`基础：${e.name} 免疫意图值削减，这一条无效`);
+      else {
+        e.roundIntentMod = (e.roundIntentMod || 0) + st.intentDown;
+        lines.push(`基础：${e.name} 本轮所有意图值 -${st.intentDown}`);
+      }
     } else lines.push("（旧版存档无结构化数值，基础效果请手动结算）");
     lines.push(...applyAllQa(card, {
       player: p, foe: e,
@@ -2100,7 +2387,7 @@ function playCard(p, card, sel, kind) {
   pending = null;
   if (playerDone(p)) state.spot = null;
   lines.push(...reapDefeated());   // 整张卡结算完再清场
-  cardHealMod = 0;
+  cardHealMod = 0; cardDmgSrc = null;
   pushLog(title, lines);
   renderAll();
 }
@@ -2127,18 +2414,15 @@ function renderFoePhase() {
   if (!cur) {
     $("foeBody").innerHTML = `
       <div class="spot-sec"><h3>选择要结算的攻击意图</h3>
-        <div class="pick-row">${pend.map(({ e, i }) => {
-          const t = state.players.find(x => x.id === i.targetId);
-          return `<div class="pick-unit" data-duel="${e.id}:${i.id}">
+        <div class="pick-row">${pend.map(({ e, i }) => `
+          <div class="pick-unit" data-duel="${e.id}:${i.id}">
             <div class="pu-head"><b>${esc(e.name)}</b><span class="pu-tag">意图值 ${intentValue(e, i)}</span></div>
-            <div class="pu-meta">基础伤害 ${dmgSpec(i)}（${dmgMin(i)}~${dmgMax(i)}） · 打向 ${t ? esc(t.name) : "未指定"}${i.note ? " · " + esc(i.note) : ""}</div>
-          </div>`;
-        }).join("")}</div></div>`;
+            <div class="pu-meta">基础伤害 ${dmgSpec(i)}（${dmgMin(i)}~${dmgMax(i)}）${i.note ? " · " + esc(i.note) : ""}</div>
+          </div>`).join("")}</div></div>`;
     $("foeBody").querySelectorAll("[data-duel]").forEach(el => el.onclick = () => {
       const [eid, iid] = el.dataset.duel.split(":").map(Number);
       const e = state.enemies.find(x => x.id === eid);
       const i = e.intents.find(x => x.id === iid);
-      if (!i.targetId && state.players.length) i.targetId = state.players[0].id;
       state.duel = { enemyId: eid, intentId: iid };
       renderAll();
     });
@@ -2146,9 +2430,25 @@ function renderFoePhase() {
   }
 
   const { e, i } = cur;
-  const target = state.players.find(x => x.id === i.targetId);
-  if (!target) {
-    $("foeBody").innerHTML = `<div class="spot-preview">这条意图还没有指定攻击目标，请在上方「敌人」面板的「打向」里选一个角色。</div>`;
+  /* 意图不带「打向」，落到谁身上在这一步定。「不容置疑」禁掉的人不列出来。
+     没人接线才走到这里，所以这个选择就是 GM 的裁定。 */
+  const victims = activePlayers().filter(x => !(e.noTarget || []).includes(x.id));
+  const target = state.players.find(x => x.id === state.duel.targetId);
+  if (!target || !victims.some(x => x.id === target.id)) {
+    $("foeBody").innerHTML = `
+      <div class="spot-head"><div class="sh-main"><b>${esc(e.name)}</b> 的攻击意图 · 意图值 <b>${intentValue(e, i)}</b>
+        · 基础伤害 <b>${dmgSpec(i)}</b>${i.note ? `<small>${esc(i.note)}</small>` : ""}</div>
+        <button class="btn ghost mini" id="btnDuelBack">← 换一条意图</button></div>
+      <div class="spot-sec"><h3>这一击落到谁身上</h3>
+        <div class="pick-row">${victims.map(x => `
+          <div class="pick-unit narrow" data-victim="${x.id}">
+            <div class="pu-head"><b>${esc(x.name)}</b><span class="pu-tag">${x.hp}/${x.maxHp}${x.temp ? ` +${x.temp}` : ""}</span></div>
+            <div class="pu-meta">体魄 ${x.attrs.体魄 ?? 0}</div>
+          </div>`).join("") || `<p class="hint">没有可以承受这一击的角色。</p>`}</div></div>`;
+    $("btnDuelBack").onclick = () => { state.duel = null; renderAll(); };
+    $("foeBody").querySelectorAll("[data-victim]").forEach(el => el.onclick = () => {
+      state.duel.targetId = +el.dataset.victim; renderAll();
+    });
     return;
   }
   const dc = intentValue(e, i);
@@ -2161,14 +2461,14 @@ function renderFoePhase() {
   $("foeBody").innerHTML = `
     <div class="spot-head">
       <div class="sh-main"><b>${esc(e.name)}</b> 的攻击意图 · 意图值 <b>${dc}</b> · 基础伤害 <b>${dmgSpec(i)}</b>
-        <small>打向 ${esc(target.name)}（${target.hp}/${target.maxHp}${target.temp ? ` +${target.temp}` : ""}）${i.note ? " · " + esc(i.note) : ""}</small></div>
+        <small>落到 ${esc(target.name)}（${target.hp}/${target.maxHp}${target.temp ? ` +${target.temp}` : ""}）${i.note ? " · " + esc(i.note) : ""}</small></div>
       <button class="btn ghost mini" id="btnDuelBack">← 换一条意图</button>
     </div>
     <div class="spot-sec"><div class="spot-preview">
       没人接下这一击，自动命中 ${esc(target.name)}
       <br>${dmgSpec(i)}${e.roundDmgDealt ? ` − 本轮削弱${e.roundDmgDealt}` : ""} + (意图值 ${dc} - 体魄 ${target.attrs.体魄 ?? 0})${
         cut ? ` − 本轮减伤${cut}` : ""} = <b>${noGuardMin}~${noGuardMax}</b> 点（结算时现掷）
-      <br><span class="mute">接线要占行动槽，只能在自己的行动里提前打出——走到这一步大家的槽位都空了。</span>
+      <br><span class="mute">接线要占行动槽，只能在自己的行动里提前打出。走到这一步大家的槽位都空了。</span>
     </div></div>
     <div class="roll-row"><button class="btn primary big" id="btnGuard">✔ 承受这一击</button></div>`;
   $("btnDuelBack").onclick = () => { state.duel = null; renderAll(); };
@@ -2219,17 +2519,23 @@ $("fileInput").onchange = (ev) => {
     r.onload = () => {
       try {
         const d = JSON.parse(r.result);
-        if (!d.基础属性) throw new Error("不是建卡器导出的角色卡");
+        // 同一个选择器吃两种文件：建卡器导出的角色卡，敌人制作器导出的敌人卡
+        if (d.敌人) {
+          const made = (d.敌人 || []).map(foeFromJson);
+          state.enemies.push(...made);
+          toast(`已导入 ${made.length} 个敌人`);
+          if (++done === files.length) renderAll();
+          return;
+        }
+        if (!d.基础属性) throw new Error("既不是角色卡也不是敌人卡");
         state.players.push(playerFromJson(d));
-        toast(`已导入「${d.基本信息?.名字 || "无名"}」`);
+        // 补过旧字段就说一声，免得玩家以为战斗器和卡面不一致
+        toast(`已导入「${d.基本信息?.名字 || "无名"}」${
+          cancelFixed ? `（修正了 ${cancelFixed} 条旧的「取消意图」范围，建议重新导出一次角色卡）` : ""}`);
       } catch (e) { toast("读取失败：" + e.message); }
       if (++done === files.length) {
         // 开局就给一个敌人，否则「选择目标」这一步会是空的
         if (state.players.length && !state.enemies.length) state.enemies.push(newEnemy());
-        // 意图默认打向第一个角色，省得每次手动指
-        state.enemies.forEach(e => e.intents.forEach(i => {
-          if (i.type === "attack" && !i.targetId) i.targetId = state.players[0].id;
-        }));
         renderAll();
       }
     };
@@ -2238,9 +2544,7 @@ $("fileInput").onchange = (ev) => {
   ev.target.value = "";
 };
 $("btnAddEnemy").onclick = () => {
-  const e = newEnemy();
-  if (state.players.length) e.intents.forEach(i => { i.targetId = state.players[0].id; });
-  state.enemies.push(e); renderAll();
+  state.enemies.push(newEnemy()); renderAll();
 };
 function nextRound() {
   const endLines = resolveRoundEnd();     // 灼烧一类的延时伤害在回合切换时落地
@@ -2256,11 +2560,11 @@ function nextRound() {
     // 减益类同样只持续本轮
     e.roundIntentMod = 0; e.roundDmgTaken = 0; e.roundDmgDealt = 0; e.roundNoHeal = false;
     e.noTarget = [];
+    endLines.push(...roundStartPassives(e));
     e.intents.forEach(i => {
       i.resolved = false;
       // 「拖延」推迟过来的意图：这一轮兑现，把叠加值折进去
       if (i.delayed) { i.value += i.delayed; i.delayed = 0; i.note = (i.note || "").replace(/（已推迟[^）]*）/, ""); }
-      if (!i.targetId && state.players.length) i.targetId = state.players[0].id;
     });
   });
   state.spot = null; pending = null; state.duel = null;
@@ -2274,8 +2578,11 @@ function resolveRoundEnd() {
   for (const t of state.pendingEnd || []) {
     const e = state.enemies.find(x => x.id === t.enemyId);
     if (!e) continue;
+    cardDmgSrc = t.src || null;             // 按当初那张卡的罪孽与攻击模式吃抗性
     const r = damageFoe(e, t.damage);
-    out.push(`${t.label}：${e.name} 在回合结束时受到 ${r.dmg} 点伤害，剩余 ${e.hp}/${e.maxHp}`);
+    cardDmgSrc = null;
+    out.push(`${t.label}：${e.name} 在回合结束时受到 ${r.dmg} 点伤害${
+      dmgWhy(r) ? `（${dmgWhy(r)}）` : ""}，剩余 ${e.hp}/${e.maxHp}`);
   }
   state.pendingEnd = [];
   out.push(...reapDefeated());
