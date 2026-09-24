@@ -340,6 +340,13 @@ const PASSIVE_FIELD_LABEL = {
   cancel: "免疫打断与驱散", intentDown: "免疫意图值削减", dmgTakenUp: "免疫本轮易伤",
   atPct: "触发血线 %", allIntentUp: "全部意图值 +", damage: "反弹伤害"
 };
+/* 一条被动的人话摘要，给角色卡上的徽章当 title 用 */
+const passiveDetail = (p) => {
+  const body = (PASSIVE_KINDS[p.kind]?.fields || [])
+    .filter(f => p[f] || p[f] === 0 && f === "cap")
+    .map(f => `${PASSIVE_FIELD_LABEL[f]}${p[f] === true ? "" : " " + p[f]}`).join("，");
+  return `${PASSIVE_KINDS[p.kind]?.label || "被动"}${body ? "：" + body : ""}`;
+};
 const passivesOf = (e, kind) => (e.passives || []).filter(x => x.kind === kind);
 const hasImmune = (e, what) => passivesOf(e, "immune").some(x => x[what]);
 /* 减伤：先减固定值，再夹单次上限。两个都填就都生效 */
@@ -940,17 +947,64 @@ function blockAllIntents(enemy, intent) {
 /* 空防：摆了架势但没有攻击落到你身上。不拼点，也就没有差值，
    所以只兑现「恢复」和「免费切架势」这两类，差值转临时生命与反伤都拿不到。
    它照样占掉行动槽、照样消耗这张卡，代价是实打实的。 */
-function emptyGuard(p, card) {
+/* 搭在 thenSwitch 上的「切出去时」加码条款（倾泻 / 久眠）。
+   接线与空防两条路都要跑，抽出来免得改一边忘一边 */
+function onSwitchOutLines(who, card) {
+  const out = [];
+  for (const q of qaStats(card)) {
+    const o = q.stats.onSwitchOut; if (!o) continue;
+    if (o.temp) out.push(`  ▸ ${q.label}：${tempLine(who, o.temp)}`);
+    if (o.diceUp) { who.roundDice = (who.roundDice || 0) + o.diceUp; out.push(`  ▸ ${q.label}：${who.name} 本轮拼点骰 +${o.diceUp}`); }
+    if (o.nextGuardDice) { who.nextRoundGuardDice = (who.nextRoundGuardDice || 0) + o.nextGuardDice; out.push(`  ▸ ${q.label}：${who.name} 下一轮防御/援护拼点骰 +${o.nextGuardDice}`); }
+  }
+  return out;
+}
+
+function emptyGuard(p, card, sel, target) {
   const st = statsOf(card), br = st?.win || {};
   const lines = [`没有攻击落到 ${esc(p.name)} 身上，不拼点`];
+  const head = lines.length;
+  // 反击大技能：临时生命照样烧掉。换来的伤害没有落点，这一手本来就不该这么打
+  if (st?.consumeTemp && (p.temp || 0) > 0) {
+    lines.push(`消耗全部临时生命 ${p.temp}，但没有攻击者可打，这份伤害落空`);
+    p.temp = 0;
+  }
+  // 援护大技能：弃整组换临时生命。这是卡面写死的代价与收益，跟拼赢没关系。
+  // 与 resolveIntercept 里那一段同源，改一边要看另一边
+  if (st?.discardRest) {
+    const g = p_group(p, card);
+    const rest = availableCards(g).filter(c => c.uid !== card.uid);
+    rest.forEach(c => consumeCard(g, c));
+    const per = qaStats(card).reduce((v, q) => q.stats.tempPerDiscardSet ?? v, st.tempPerDiscard ?? 0);
+    const gain = rest.length * per;
+    p.temp = (p.temp || 0) + gain;
+    lines.push(`弃掉本组其余 ${rest.length} 张卡（${rest.map(c => `${c.sinLabel}·${c.traitLabel}`).join("、") || "无"}），获得 ${gain} 点临时生命`);
+  }
   if (br.heal) lines.push(healLine(p, br.heal));
+  // 不带胜负条件的问答特效照常结算：它们看的是「打出这张卡」，与拼点结果无关。
+  // opts 不给 hit，所以 onHit 那几条自然不发动
+  const ctx = { player: p, foe: null, guarded: target, card,
+    extraFoe: state.enemies.find(x => x.id === sel?.extraFoeId),
+    extraAlly: state.players.find(x => x.id === sel?.extraAllyId) };
+  for (const q of qaStats(card)) {
+    if (q.stats.win || q.stats.lose) continue;
+    lines.push(...applyQaStat(q, ctx));
+  }
+  // 胜负分支里只放行恢复与免费切换，反压 / 差值临时生命 / 反击伤害都是拼赢的奖励
   for (const q of qaStats(card)) {
     const w = q.stats.win;
     if (w?.heal) lines.push(`  ▸ ${q.label}：${healLine(p, w.heal)}`);
     if (w?.freeSwitch) lines.push(...setStance(p, otherStance(groupIdOfCard(p, card)), `  ▸ ${q.label}（免费，不占行动槽）`));
   }
   if (br.freeSwitch) lines.push(...setStance(p, otherStance(groupIdOfCard(p, card)), "免费切换架势"));
-  if (lines.length === 1) lines.push("这张卡在空防下没有可兑现的收益");
+  // 【切换】是卡面写死的「结算后切换到另一组」，不是拼赢的奖励，空防照切。
+  // 少了这一步，怠惰那两张大技能打成空防会被白吃掉：牌烧了、组没弃、架势没换，
+  // 本组停在一个卡面前提（满组 / 空组）永远造不出来的状态
+  if (st?.thenSwitch || qaThenSwitch(card)) {
+    lines.push(...onSwitchOutLines(p, card));
+    lines.push(...setStance(p, otherStance(groupIdOfCard(p, card)), "【切换】结算后换组"));
+  }
+  if (lines.length === head) lines.push("这张卡在空防下没有可兑现的收益");
   return lines;
 }
 
@@ -1110,13 +1164,7 @@ function resolveIntercept({ who, target, card, mod, enemy, intent, roll, dmgRoll
   // 【切换】结算后换到另一组。按卡所属组取对侧，那也就是当前架势的对侧。
   // 卡片级（怠惰的反击/援护）与问答级（各罪孽的【切换】选项）走同一条路，只切一次
   if (st?.thenSwitch || qaThenSwitch(card)) {
-    // 搭在 thenSwitch 上的「切出去时」加码条款（倾泻 / 久眠）
-    for (const q of qaStats(card)) {
-      const o = q.stats.onSwitchOut; if (!o) continue;
-      if (o.temp) lines.push(`  ▸ ${q.label}：${tempLine(who, o.temp)}`);
-      if (o.diceUp) { who.roundDice = (who.roundDice || 0) + o.diceUp; lines.push(`  ▸ ${q.label}：${who.name} 本轮拼点骰 +${o.diceUp}`); }
-      if (o.nextGuardDice) { who.nextRoundGuardDice = (who.nextRoundGuardDice || 0) + o.nextGuardDice; lines.push(`  ▸ ${q.label}：${who.name} 下一轮防御/援护拼点骰 +${o.nextGuardDice}`); }
-    }
+    lines.push(...onSwitchOutLines(who, card));
     lines.push(...setStance(who, otherStance(groupIdOfCard(who, card)), "【切换】结算后换组"));
   }
   return { win, clashVal, dc, margin, lines };
@@ -1301,44 +1349,71 @@ function renderDeck() {
   });
 }
 
+/* 抗性与被动是敌人制作器定义的，战斗器只显示不编辑。展开态要是看不到它们，
+   GM 会把这个敌人当白板，日志里突然冒出的「抗性 ×0.5」就成了没有出处的数字。 */
+function foeMeta(e) {
+  const rs = Object.entries(e.resist || {}).filter(([, v]) => v !== 1).map(([k, v]) =>
+    `<span class="ptag ${v > 1 ? "warn" : "mute"}" title="${v > 1 ? "弱点" : v > 0 ? "抗性" : "免疫或吸收"}">${RESIST_KEYS[k]} ×${v}</span>`);
+  const ps = (e.passives || []).map(p =>
+    `<span class="ptag" title="${esc(passiveDetail(p))}">${esc(p.label || PASSIVE_KINDS[p.kind]?.label || "被动")}</span>`);
+  if (!rs.length && !ps.length) return "";
+  return `<div class="foe-meta">
+    ${rs.length ? `<span class="meta-lab">抗性</span>${rs.join("")}` : ""}
+    ${ps.length ? `<span class="meta-lab">被动</span>${ps.join("")}` : ""}
+  </div>`;
+}
+
 function renderEnemies() {
   if (!state.enemies.length) {
     $("enemies").innerHTML = `<p class="empty">尚未添加敌人。<br>点右上角「＋ 新增」，新敌人默认带一条攻击意图。</p>`;
     return;
   }
   $("enemies").innerHTML = state.enemies.map((e, idx) => {
-    const open = expanded.has(e.id);
+    const open = expanded.has(e.id), kd = e.kind || "mob";
     return `
-    <div class="unit foe">
+    <div class="unit foe${open ? " open" : ""}">
       <div class="unit-head">
         <span class="foe-pos" title="站位：上下相邻的敌人算「相邻」">${idx + 1}</span>
         <input class="name-input" data-ef="name" data-id="${e.id}" value="${esc(e.name)}">
-        <button class="btn ghost mini" data-move="${e.id}" data-dir="-1" ${idx === 0 ? "disabled" : ""} title="上移">↑</button>
-        <button class="btn ghost mini" data-move="${e.id}" data-dir="1" ${idx === state.enemies.length - 1 ? "disabled" : ""} title="下移">↓</button>
-        <button class="btn ghost mini" data-del="${e.id}" title="删除这个敌人">✕</button>
+        ${open ? `
+        <div class="kind-pick" title="${esc(FOE_KINDS[kd].desc)}">
+          ${Object.entries(FOE_KINDS).map(([k, v]) => `<button class="kd-btn${kd === k ? " on" : ""}"
+            data-kind="${k}" data-id="${e.id}" title="${esc(v.desc)}">${v.label}</button>`).join("")}
+        </div>` : `<span class="foe-kind">${FOE_KINDS[kd].label}</span>`}
+        <div class="foe-btns">
+          <button class="btn ghost mini" data-move="${e.id}" data-dir="-1" ${idx === 0 ? "disabled" : ""} title="上移">↑</button>
+          <button class="btn ghost mini" data-move="${e.id}" data-dir="1" ${idx === state.enemies.length - 1 ? "disabled" : ""} title="下移">↓</button>
+          <button class="btn ghost mini" data-del="${e.id}" title="删除这个敌人">✕</button>
+        </div>
       </div>
-      ${open ? `
-      <div class="kind-pick" title="${esc(FOE_KINDS[e.kind || "mob"].desc)}">
-        ${Object.entries(FOE_KINDS).map(([k, v]) => `<button class="kd-btn${(e.kind || "mob") === k ? " on" : ""}"
-          data-kind="${k}" data-id="${e.id}" title="${esc(v.desc)}">${v.label}</button>`).join("")}
-      </div>` : `<span class="foe-kind">${FOE_KINDS[e.kind || "mob"].label}</span>`}
       ${hpBar(e.hp, e.maxHp, e.temp, "foe")}
       ${(e.roundIntentMod || e.roundDmgTaken || e.roundDmgDealt) ? `<div class="unit-flags">
         ${e.roundIntentMod ? `<span class="ptag">本轮意图值 -${e.roundIntentMod}</span>` : ""}
         ${e.roundDmgTaken ? `<span class="ptag warn">本轮受到伤害 +${e.roundDmgTaken}</span>` : ""}
         ${e.roundDmgDealt ? `<span class="ptag dmg">本轮造成伤害 -${e.roundDmgDealt}</span>` : ""}
       </div>` : ""}
-      ${open ? "" : `<div class="unit-brief">${esc(foeBrief(e))}</div>`}
       ${open ? `
-      <div class="unit-stats">
-        ${numField("HP", "ef", e.id, "hp", e.hp)}
-        ${numField("上限", "ef", e.id, "maxHp", e.maxHp)}
-        ${numField("临时生命", "ef", e.id, "temp", e.temp)}
-      </div>
-      <div class="intents">
-        ${e.intents.map(i => `
-          <div class="intent i-${i.type}${i.resolved ? " done" : ""}">
-            <div class="intent-row">
+      <div class="foe-edit">
+        <div class="fe-col">
+          <div class="unit-stats">
+            ${numField("HP", "ef", e.id, "hp", e.hp)}
+            ${numField("上限", "ef", e.id, "maxHp", e.maxHp)}
+            ${numField("临时生命", "ef", e.id, "temp", e.temp)}
+            ${numField("意图修正", "ef", e.id, "clashMod", e.clashMod, 'title="所有意图值加这个数，正数变强"')}
+            ${numField("受到伤害 +", "ef", e.id, "roundDmgTaken", e.roundDmgTaken || 0, 'title="本轮它每次受伤都加这个数"')}
+            ${numField("造成伤害 -", "ef", e.id, "roundDmgDealt", e.roundDmgDealt || 0, 'title="本轮它打出的伤害减这个数"')}
+          </div>
+          ${foeMeta(e)}
+          <p class="hint">减益卡压下来的部分已自动计入，不用重复填。后三格是给工具还不认的来源用的，
+            比如 E.G.O 的「衰弱 / 余烬 / 燃尽」和你临场裁定的效果，都在回合结束时清零。
+            抗性与被动在敌人制作器里编辑，这里只读。</p>
+        </div>
+        <div class="fe-col">
+          <div class="fe-head"><h4>意图</h4>
+            <button class="btn ghost mini" data-addint="${e.id}">＋ 意图</button></div>
+          <div class="intents">
+            ${e.intents.map(i => `
+            <div class="intent i-${i.type}${i.resolved ? " done" : ""}">
               <select data-if="type" data-eid="${e.id}" data-iid="${i.id}" title="${INTENT_TYPES[i.type].desc}">
                 ${Object.entries(INTENT_TYPES).map(([k, v]) => `<option value="${k}"${i.type === k ? " selected" : ""}>${v.label}</option>`).join("")}
               </select>
@@ -1349,28 +1424,16 @@ function renderEnemies() {
                          type="number" class="iv sm" data-if="dmgFaces" data-eid="${e.id}" data-iid="${i.id}" value="${i.dmgFaces}" min="2" max="100">+<input
                          type="number" class="iv sm" data-if="dmgFlat" data-eid="${e.id}" data-iid="${i.id}" value="${i.dmgFlat}">
                   <b class="dice-range">${dmgMin(i)}~${dmgMax(i)} 均${dmgAvg(i).toFixed(1)}</b></span>` : ""}
-              ${i.resolved ? `<span class="pill rej">已结算</span>` : ""}
-              <button class="btn ghost mini" data-delint="${i.id}" data-eid="${e.id}">✕</button>
-            </div>
-            <div class="intent-row">
               <input class="inote" data-if="note" data-eid="${e.id}" data-iid="${i.id}" value="${esc(i.note)}" placeholder="备注">
-            </div>
-          </div>`).join("") || `<p class="hint">没有意图，我方攻击此敌人只能是单方面攻击：自动命中，但没有差值，伤害只有基础加卡面调整</p>`}
-      </div>` : ""}
+              ${i.resolved ? `<span class="ptag mute">已结算</span>` : ""}
+              <button class="btn ghost mini" data-delint="${i.id}" data-eid="${e.id}" title="删除这条意图">✕</button>
+            </div>`).join("") || `<p class="hint">没有意图，我方攻击此敌人只能是单方面攻击：自动命中，但没有差值，伤害只有基础加卡面调整</p>`}
+          </div>
+        </div>
+      </div>` : `<div class="unit-brief">${esc(foeBrief(e))}</div>`}
       <div class="unit-foot">
-        ${open ? `<button class="btn ghost mini" data-addint="${e.id}">＋ 意图</button>` : ""}
         <button class="btn ghost mini" data-adv="${e.id}">${open ? "▲ 收起" : "▼ 展开"}</button>
       </div>
-      ${open ? `
-      <div class="unit-adv">
-        <div class="unit-stats">
-          ${numField("意图修正", "ef", e.id, "clashMod", e.clashMod)}
-          ${numField("本轮受到伤害 +", "ef", e.id, "roundDmgTaken", e.roundDmgTaken || 0)}
-          ${numField("本轮造成伤害 -", "ef", e.id, "roundDmgDealt", e.roundDmgDealt || 0)}
-        </div>
-        <p class="hint">减益卡压下来的部分已自动计入，不用重复填。这三格是给工具还不认的来源用的，比如
-          E.G.O 的「衰弱 / 余烬 / 燃尽」、【切换】类特效、以及你临场裁定的效果。三项都在回合结束时清零。</p>
-      </div>` : ""}
     </div>`;
   }).join("");
 
@@ -2211,7 +2274,7 @@ function playCard(p, card, sel, kind) {
     if (sel.intentId === "none") {
       // 空防：没有攻击落下来，不拼点。只兑现恢复与切架势，差值临时生命与反伤都拿不到
       title = `【第${state.round}回合】${p.name} 空防（打出「${card.sinLabel}·${card.traitLabel}」，没有攻击可接）`;
-      lines.push(...emptyGuard(p, card));
+      lines.push(...emptyGuard(p, card, sel, target));
       p.interceptRound = state.round;
     } else {
       // 意图可能在选中之后被别人拼掉。不拦住就会抛异常，表现成「按钮点了没反应」，非常难查

@@ -67,8 +67,9 @@
       <input type="number" data-${f}="${field}" data-id="${id}" value="${val}" ${extra}></label>`;
 
   function resistBlock(f) {
+    // .sin-icon 是 width:100%，靠容器定尺寸。裸放进标签里会撑成一整格，要套 .sin-icon-inline
     const cell = ([k, label]) => `
-      <label class="ustat"><span>${k in SINS ? `${sinIcon(k)} ` : ""}${label}</span>
+      <label class="ustat"><span>${k in SINS ? `<span class="sin-icon-inline">${sinIcon(k)}</span>` : ""}${label}</span>
         <input type="number" step="0.1" data-rf="${k}" data-id="${f.id}" value="${f.resist[k] ?? 1}"></label>`;
     return `<div class="fm-sec"><h4>抗性 <button class="btn ghost mini" data-resetres="${f.id}">全部设回 1</button></h4>
       <div class="fm-sub">攻击模式</div>
@@ -106,23 +107,19 @@
     return `<div class="fm-sec"><h4>意图 <button class="btn ghost mini" data-iadd="${f.id}">＋ 意图</button></h4>
       <div class="intents">${(f.intents || []).map(i => `
         <div class="intent i-${i.type}">
-          <div class="intent-row">
-            <select data-if="type" data-fid="${f.id}" data-iid="${i.id}">
-              ${Object.entries(INTENTS).map(([k, v]) =>
-                `<option value="${k}"${i.type === k ? " selected" : ""}>${v}</option>`).join("")}
-            </select>
-            ${i.type === "attack" ? `
-              <label class="ilab">意图值<input type="number" class="iv" data-if="value" data-fid="${f.id}" data-iid="${i.id}" value="${i.value}"></label>
-              <span class="ilab dice">伤害
-                <input type="number" class="iv sm" data-if="dmgN" data-fid="${f.id}" data-iid="${i.id}" value="${i.dmgN}" min="1" max="10">d<input
-                       type="number" class="iv sm" data-if="dmgFaces" data-fid="${f.id}" data-iid="${i.id}" value="${i.dmgFaces}" min="2" max="100">+<input
-                       type="number" class="iv sm" data-if="dmgFlat" data-fid="${f.id}" data-iid="${i.id}" value="${i.dmgFlat}">
-                <b class="dice-range">${i.dmgN + i.dmgFlat}~${i.dmgN * i.dmgFaces + i.dmgFlat}</b></span>` : ""}
-            <button class="btn ghost mini" data-idel="${i.id}" data-fid="${f.id}">✕</button>
-          </div>
-          <div class="intent-row">
-            <input class="inote" data-if="note" data-fid="${f.id}" data-iid="${i.id}" value="${esc(i.note)}" placeholder="备注">
-          </div>
+          <select data-if="type" data-fid="${f.id}" data-iid="${i.id}">
+            ${Object.entries(INTENTS).map(([k, v]) =>
+              `<option value="${k}"${i.type === k ? " selected" : ""}>${v}</option>`).join("")}
+          </select>
+          ${i.type === "attack" ? `
+            <label class="ilab">意图值<input type="number" class="iv" data-if="value" data-fid="${f.id}" data-iid="${i.id}" value="${i.value}"></label>
+            <span class="ilab dice">伤害
+              <input type="number" class="iv sm" data-if="dmgN" data-fid="${f.id}" data-iid="${i.id}" value="${i.dmgN}" min="1" max="10">d<input
+                     type="number" class="iv sm" data-if="dmgFaces" data-fid="${f.id}" data-iid="${i.id}" value="${i.dmgFaces}" min="2" max="100">+<input
+                     type="number" class="iv sm" data-if="dmgFlat" data-fid="${f.id}" data-iid="${i.id}" value="${i.dmgFlat}">
+              <b class="dice-range">${i.dmgN + i.dmgFlat}~${i.dmgN * i.dmgFaces + i.dmgFlat}</b></span>` : ""}
+          <input class="inote" data-if="note" data-fid="${f.id}" data-iid="${i.id}" value="${esc(i.note)}" placeholder="备注">
+          <button class="btn ghost mini" data-idel="${i.id}" data-fid="${f.id}" title="删除这条意图">✕</button>
         </div>`).join("") || `<p class="hint">没有意图的敌人只能被单方面攻击。</p>`}</div></div>`;
   }
 

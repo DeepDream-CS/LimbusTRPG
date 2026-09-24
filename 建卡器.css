@@ -364,9 +364,11 @@ button:focus-visible,.subchip:focus-visible,.rdot:focus-visible,.dot:focus-visib
 .bar.mini span{font-size:10px;line-height:12px}
 
 .intents{display:flex;flex-direction:column;gap:6px;margin:8px 0}
-.intent{display:flex;flex-direction:column;gap:4px;background:#161923;border-radius:6px;padding:6px 8px;
-  border-left:3px solid var(--line)}
-.intent-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+/* 一条意图就是一行：类型 · 意图值 · XdY+Z · 备注 · 删除。
+   以前拆成两行（数值一行、备注一行），在 260px 的列里会折成五六行，
+   一个敌人顶掉半屏。现在靠展开态占满整行来给它宽度。 */
+.intent{display:flex;align-items:center;gap:6px;flex-wrap:wrap;background:#161923;border-radius:6px;
+  padding:6px 8px;border-left:3px solid var(--line)}
 .ilab{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted)}
 .ilab select{background:#0e1016;border:1px solid var(--line);color:var(--text);
   border-radius:5px;font-size:11px;padding:2px 4px;max-width:120px}
@@ -378,11 +380,39 @@ button:focus-visible,.subchip:focus-visible,.rdot:focus-visible,.dot:focus-visib
 .intent.i-buff{border-left-color:var(--ok)}
 .intent.i-debuff{border-left-color:#a24f9e}
 .intent.done{opacity:.45}
-.intent select{background:#0e1016;border:1px solid var(--line);color:var(--text);border-radius:5px;font-size:11px;padding:2px 4px}
+/* width:auto 是在盖全局的 select{width:100%}，否则类型下拉会独占一行，整条意图折成两行 */
+.intent select{width:auto;flex:none;background:#0e1016;border:1px solid var(--line);color:var(--text);
+  border-radius:5px;font-size:11px;padding:2px 4px}
 .intent .iv{width:46px;background:#0e1016;border:1px solid var(--accent);color:var(--accent-2);
   border-radius:5px;padding:2px 5px;font-size:13px;font-weight:700;text-align:center}
-.intent .inote{flex:1;min-width:40px;background:#0e1016;border:1px solid var(--line);color:var(--text);
+.intent .inote{flex:1;min-width:80px;background:#0e1016;border:1px solid var(--line);color:var(--text);
   border-radius:5px;padding:2px 5px;font-size:11px}
+.intent>.btn.mini{margin-left:auto}
+
+/* 展开的敌人卡占满整行，内部再分「数值」与「意图」两栏。
+   折叠态仍是一列一个，只有正在编辑的那个铺开。 */
+#enemies .unit.open{grid-column:1/-1}
+.foe-edit{display:grid;grid-template-columns:minmax(230px,1fr) minmax(300px,1.35fr);gap:18px;margin-top:12px}
+.foe-edit .unit-stats{grid-template-columns:repeat(3,1fr);margin-top:0}
+.foe-edit .intents{margin:0}
+.foe-edit .hint{margin-top:10px}
+.fe-head{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.fe-head h4{margin:0;font-size:12px;color:var(--accent-2);font-weight:600;letter-spacing:1px}
+.fe-head .btn.mini{margin-left:auto}
+/* 抗性与被动来自敌人制作器，这里只读 */
+.foe-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:12px}
+.meta-lab{font-size:11px;color:var(--muted);letter-spacing:1px}
+/* 类型开关移进标题行，省掉一整行；折叠时那里显示的是只读徽章 */
+.unit-head .kind-pick{margin:0;flex:none}
+.unit-head .kd-btn{flex:none;padding:3px 8px}
+.unit-head .foe-kind{margin-top:0;flex:none}
+/* 敌人标题行塞了站位、名字、类型和三个按钮，窄列里允许折行，别把名字挤没。
+   ↑↓✕ 打包成一组，要折就三个一起折，不会单独掉一个下去 */
+#enemies .unit-head{flex-wrap:wrap}
+#enemies .name-input{min-width:70px}
+.foe-btns{display:flex;gap:6px;flex:none;margin-left:auto}
+.foe-btns .btn.mini{padding:3px 8px}
+@media(max-width:820px){.foe-edit{grid-template-columns:1fr;gap:12px}}
 
 /* ---- 聚光灯：四步流程条 ---- */
 .flow{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
