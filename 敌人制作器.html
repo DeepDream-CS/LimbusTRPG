@@ -3,49 +3,55 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Limbus Company TRPG · 敌人制作器</title>
-<link rel="stylesheet" href="建卡器.css?v=66">
+<title>Limbus Company TRPG 2.0 · 30秒异想体与遭遇配怪器</title>
+<link rel="stylesheet" href="建卡器.css?v=3">
 </head>
 <body>
-<div class="app app-foemaker">
+<div class="app app-wide">
   <header class="top">
     <div class="brand">
-      <h1>Limbus Company TRPG · 敌人制作器</h1>
-      <div class="sub">Foe Maker</div>
-      <a class="btn ghost btn-goto" href="index.html">← 建卡器</a>
-      <a class="btn ghost btn-reset" href="战斗器.html">⚔ 战斗计算器</a>
-      <a class="btn ghost btn-reset" href="题库.html">📖 题库</a>
-      <a class="btn ghost btn-reset" href="记录器.html">🗂 记录器</a>
+      <h1>Limbus Company TRPG · 30秒配怪器</h1>
+      <span class="sub">v2.0 Foe Maker</span>
+      <div class="brand-nav">
+        <a class="btn ghost" href="index.html">← 建卡与成长器</a>
+        <a class="btn ghost" href="战斗器.html">⚔ 群聊场控 & 战斗器</a>
+        <a class="btn ghost" href="题库.html">📖 规则与词条速查</a>
+        <button class="btn" id="btnCopyEncounter">📋 复制群聊图鉴</button>
+        <button class="btn primary" id="btnExport">⬇ 导出遭遇 JSON</button>
+        <button class="btn ghost" id="btnImport">⇩ 导入</button>
+        <button class="btn ghost danger-hover" id="btnClear">↺ 清空</button>
+      </div>
     </div>
-    <div class="round-bar">
-      <span class="round-tally" id="fmCount"></span>
-      <button class="btn" id="btnAdd">＋ 新增敌人</button>
-      <button class="btn" id="btnExport">⬇ 导出 JSON</button>
-      <button class="btn ghost" id="btnImport">⇩ 导入</button>
-      <button class="btn ghost" id="btnClear">↺ 全部清空</button>
-    </div>
+    <input type="file" id="fileInput" accept=".json,application/json" hidden>
   </header>
 
   <main class="stage">
-    <div class="card">
-      <h2>遭遇编辑</h2>
-      <p class="lead">一个文件就是一场遭遇，可以放多个敌人。做好之后导出 JSON，在战斗计算器里用「导入角色」那个按钮读进去，
-        它同时认角色卡和敌人卡。战斗器里现场捏敌人的路子不受影响，那边捏出来的就是一个全 1 抗性、没有被动的普通敌人。</p>
-      <div class="attr-help">
-        <b>抗性系数：</b> 1 是正常，小于 1 抗，大于 1 是弱点，0 及以下免疫。乘完<b>向上取整</b>，所以系数只要大于 0，这一击至少还剩 1 点。
-        <br>攻击模式与罪孽<b>两维相乘</b>。一个既抗斩击 0.5 又抗暴怒 0.5 的敌人，挨暴怒的斩击卡只吃 0.25 倍。
-        <br><b>被动：</b> 五类模板，填数值即可，战斗器会在各自的时机自动结算。不填的字段不生效。
-      </div>
-      <div id="fmList"></div>
+    <div class="card" style="margin-bottom:16px">
+      <h2>一键数值尺与预设模板</h2>
+      <p class="lead">选定本场遭遇的<b>危险等级</b>与我方<b>参战总行动槽数 S</b>（初期 3 人队 S=3；HE 阶双槽 3 人队 S=6），点一下按钮即可按标准平衡公式自动生成敌人或双部位异想体。</p>
+      <div class="pool" id="scaleBar"></div>
+      <div class="export-row" id="presetBar" style="margin-top:10px;padding-top:10px;border-top:1px dashed var(--line)"></div>
     </div>
+
+    <div class="card" style="margin-bottom:16px">
+      <div class="grid2">
+        <label class="field" style="margin:0">
+          <span class="lab">遭遇名称</span>
+          <input type="text" id="encTitle" placeholder="例如：TETH 异想体《红舞鞋》镇压战">
+        </label>
+        <label class="field" style="margin:0">
+          <span class="lab">通关战利品 / 备注（选填）</span>
+          <input type="text" id="encReward" placeholder="例如：每人 3 纺锤 + 提取 TETH E.G.O【红舞鞋】">
+        </label>
+      </div>
+    </div>
+
+    <div id="foeList"></div>
   </main>
 </div>
 
-<input type="file" id="fileInput" accept=".json,application/json" hidden>
 <div class="toast" id="toast"></div>
-<!-- 引用建卡器只为了罪孽名与攻击模式名。它末尾的初始化以 #stageCard 为开关，
-     本页没有那个元素，所以只会留下数据表与纯函数 -->
-<script src="建卡器.js?v=66"></script>
-<script src="敌人制作器.js?v=66"></script>
+<script src="建卡器.js?v=3"></script>
+<script src="敌人制作器.js?v=3"></script>
 </body>
 </html>

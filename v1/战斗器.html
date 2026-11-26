@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Limbus Company TRPG · 战斗计算器</title>
+<link rel="stylesheet" href="建卡器.css?v=68">
+</head>
+<body>
+<div class="app app-combat">
+  <header class="top">
+    <div class="brand">
+      <h1>Limbus Company TRPG · 战斗计算器</h1>
+      <div class="sub">Combat Tracker</div>
+      <a class="btn ghost btn-goto" href="index.html">← 建卡器</a>
+      <a class="btn ghost btn-reset" href="鉴定器.html">🎲 鉴定器</a>
+      <a class="btn ghost btn-reset" href="题库.html">📖 题库</a>
+      <a class="btn ghost btn-reset" href="记录器.html">🗂 记录器</a>
+      <a class="btn ghost btn-reset" href="敌人制作器.html">👹 敌人制作器</a>
+    </div>
+    <div class="round-bar">
+      <span class="round-no">第 <b id="roundNo">1</b> 回合</span>
+      <span class="round-tally" id="roundTally"></span>
+      <button class="btn" id="btnNextRound">下一回合 →</button>
+      <button class="btn ghost" id="btnResetAll">↺ 重置战斗</button>
+    </div>
+  </header>
+
+  <!-- 场上单位：始终在聚光灯上方，任何窗口宽度下都不会被挤到日志后面 -->
+  <section class="board">
+    <div class="card">
+      <h3 class="sec-head">我方 <button class="btn ghost mini" id="btnImport">⇩ 导入角色</button></h3>
+      <input type="file" id="fileInput" accept=".json,application/json" multiple hidden>
+      <div id="players"><p class="empty">尚未导入角色。<br>用建卡器的「导出 JSON」得到文件。</p></div>
+    </div>
+
+    <div class="card">
+      <h3 class="sec-head">敌人 <button class="btn ghost mini" id="btnAddEnemy">＋ 新增</button></h3>
+      <div id="enemies"><p class="empty">尚未添加敌人。</p></div>
+    </div>
+  </section>
+
+  <main class="stage">
+    <!-- 聚光灯：出牌与接线都在这里 -->
+    <div class="card" id="spotCard">
+      <h2>聚光灯</h2>
+      <p class="lead">按槽位出牌，卡片来自当前架势那一组。防御 / 援护 / 反击是接线卡，在自己的行动里主动打出，接下敌方某条攻击意图；和攻击一样占一个行动槽，防了就不能再动，每轮限接一次。防御与反击护自己，援护先选替谁挡。没有攻击可接时可以空防。不借技能牌切换架势同样占一个行动槽；开局设定架势用角色卡上的 A/B 开关，那个是免费的。</p>
+      <div id="spotFlow"></div>
+      <div id="spotPick"></div>
+      <div id="spotBody"></div>
+    </div>
+
+    <!-- 收尾：所有人行动完后，没人接下的攻击自动落地 -->
+    <div class="card" id="foeCard" hidden>
+      <h2>敌方攻击落地</h2>
+      <p class="lead">所有人都行动完了。以下攻击意图没人接线，逐条结算。接线要占行动槽，必须在自己的行动里提前打出，这一步只负责让剩下的攻击落地。</p>
+      <div id="foeBody"></div>
+    </div>
+
+    <!-- 卡组浏览 / 手动弃牌 -->
+    <div class="card" id="deckCard" hidden style="margin-top:20px">
+      <h2 class="sec-head"><span id="deckTitle">卡组</span>
+        <button class="btn ghost mini" id="btnDeckClose">✕ 关闭</button></h2>
+      <p class="lead">卡片与问答特效自带的弃牌会在出牌流程里自动让你勾选，无需来此处手点。这里仅供查看两组牌池，或由 GM 临场手动弃牌调整（弃牌与打出一样消耗卡组循环）。</p>
+      <div id="deckBody"></div>
+    </div>
+
+    <div class="card" style="margin-top:20px">
+      <h2>战斗日志</h2>
+      <div id="log"><p class="empty">还没有记录。</p></div>
+    </div>
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+<script src="战斗器.js?v=68"></script>
+</body>
+</html>

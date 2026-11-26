@@ -3,76 +3,103 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Limbus Company TRPG · 战斗计算器</title>
-<link rel="stylesheet" href="建卡器.css?v=66">
+<title>Limbus Company TRPG 2.0 · 群聊场控与自动战斗器</title>
+<link rel="stylesheet" href="建卡器.css?v=3">
 </head>
 <body>
-<div class="app app-combat">
+<div class="app app-wide">
   <header class="top">
     <div class="brand">
-      <h1>Limbus Company TRPG · 战斗计算器</h1>
-      <div class="sub">Combat Tracker</div>
-      <a class="btn ghost btn-goto" href="index.html">← 建卡器</a>
-      <a class="btn ghost btn-reset" href="鉴定器.html">🎲 鉴定器</a>
-      <a class="btn ghost btn-reset" href="题库.html">📖 题库</a>
-      <a class="btn ghost btn-reset" href="记录器.html">🗂 记录器</a>
-      <a class="btn ghost btn-reset" href="敌人制作器.html">👹 敌人制作器</a>
+      <h1>Limbus Company TRPG · 群聊场控与战斗器</h1>
+      <span class="sub">v2.0 Director</span>
+      <div class="brand-nav">
+        <a class="btn ghost" href="index.html">← 建卡与成长器</a>
+        <a class="btn ghost" href="敌人制作器.html">👹 30秒配怪器</a>
+        <a class="btn ghost" href="题库.html">📖 规则与词条速查</a>
+        <a class="btn ghost" href="v1/战斗器.html">📦 1.0旧版</a>
+      </div>
     </div>
     <div class="round-bar">
       <span class="round-no">第 <b id="roundNo">1</b> 回合</span>
-      <span class="round-tally" id="roundTally"></span>
+      <span class="round-tally" id="roundHint"></span>
+      <button class="btn primary" id="btnCopyBoard">📋 复制群聊回合面板</button>
+      <button class="btn" id="btnCopyLog">📋 复制本轮战报</button>
       <button class="btn" id="btnNextRound">下一回合 →</button>
-      <button class="btn ghost" id="btnResetAll">↺ 重置战斗</button>
+      <button class="btn ghost danger-hover" id="btnResetAll">↺ 重置战场</button>
     </div>
   </header>
 
-  <!-- 场上单位：始终在聚光灯上方，任何窗口宽度下都不会被挤到日志后面 -->
-  <section class="board">
-    <div class="card">
-      <h3 class="sec-head">我方 <button class="btn ghost mini" id="btnImport">⇩ 导入角色</button></h3>
-      <input type="file" id="fileInput" accept=".json,application/json" multiple hidden>
-      <div id="players"><p class="empty">尚未导入角色。<br>用建卡器的「导出 JSON」得到文件。</p></div>
-    </div>
-
-    <div class="card">
-      <h3 class="sec-head">敌人 <button class="btn ghost mini" id="btnAddEnemy">＋ 新增</button></h3>
-      <div id="enemies"><p class="empty">尚未添加敌人。</p></div>
-    </div>
-  </section>
-
   <main class="stage">
-    <!-- 聚光灯：出牌与接线都在这里 -->
-    <div class="card" id="spotCard">
-      <h2>聚光灯</h2>
-      <p class="lead">按槽位出牌，卡片来自当前架势那一组。防御 / 援护 / 反击是接线卡，在自己的行动里主动打出，接下敌方某条攻击意图；和攻击一样占一个行动槽，防了就不能再动，每轮限接一次。防御与反击护自己，援护先选替谁挡。没有攻击可接时可以空防。不借技能牌切换架势同样占一个行动槽；开局设定架势用角色卡上的 A/B 开关，那个是免费的。</p>
-      <div id="spotFlow"></div>
-      <div id="spotPick"></div>
-      <div id="spotBody"></div>
+    <!-- 公共罪孽池 -->
+    <div class="sin-pool-bar" id="sinPoolBar"></div>
+
+    <!-- 双方单位面板 -->
+    <section class="board-grid">
+      <div class="card">
+        <div class="sec-head" style="margin-bottom:10px">
+          <h2 style="margin:0;font-size:17px">我方罪人</h2>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn ghost mini" id="btnImport">⇩ 导入角色/遭遇 JSON</button>
+            <button class="btn ghost mini" id="btnDemoParty">⚡ 载入示例三人队</button>
+          </div>
+        </div>
+        <input type="file" id="fileInput" accept=".json,application/json" multiple hidden>
+        <div class="unit-list" id="playerList"></div>
+      </div>
+
+      <div class="card">
+        <div class="sec-head" style="margin-bottom:10px">
+          <h2 style="margin:0;font-size:17px">敌方 / 异想体部位</h2>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <select id="presetEncSel" style="width:auto;padding:3px 8px;font-size:12px">
+              <option value="rats">预设：ZAYIN 后巷清道夫</option>
+              <option value="redshoes" selected>预设：TETH 异想体《红舞鞋》</option>
+              <option value="shooter">预设：HE 异想体《魔弹射手》</option>
+            </select>
+            <button class="btn ghost mini" id="btnLoadPreset">👹 载入遭遇</button>
+            <button class="btn ghost mini" id="btnQuickMob">＋ 杂兵</button>
+          </div>
+        </div>
+        <div class="unit-list" id="enemyList"></div>
+      </div>
+    </section>
+
+    <!-- 同步排线与一键结算台 -->
+    <div class="card" style="margin-bottom:18px" id="wireCard">
+      <div class="sec-head">
+        <div>
+          <h2>同步排线与交锋工作台</h2>
+          <p class="lead" style="margin-bottom:6px">全队自由调整出手顺位（1号位先手削弱/破防，后手收割）。既可手填跑团群里骰娘投出的 <code>1D6</code> 点数，也可留空由系统自动代投。</p>
+        </div>
+      </div>
+      <div id="resBanner"></div>
+      <div class="wire-rows" id="wireRows"></div>
+      <div class="export-row" id="wireActions"></div>
     </div>
 
-    <!-- 收尾：所有人行动完后，没人接下的攻击自动落地 -->
-    <div class="card" id="foeCard" hidden>
-      <h2>敌方攻击落地</h2>
-      <p class="lead">所有人都行动完了。以下攻击意图没人接线，逐条结算。接线要占行动槽，必须在自己的行动里提前打出，这一步只负责让剩下的攻击落地。</p>
-      <div id="foeBody"></div>
-    </div>
+    <!-- 群聊面板实时文本抽屉与战斗日志 -->
+    <div class="grid2">
+      <div class="card">
+        <div class="sec-head" style="margin-bottom:8px">
+          <h2 style="font-size:17px;margin:0">群聊回合置顶面板（实时生成）</h2>
+          <button class="btn mini" id="btnCopyBoard2">📋 一键复制</button>
+        </div>
+        <textarea class="code-box" id="boardTextPreview" style="min-height:220px" readonly></textarea>
+      </div>
 
-    <!-- 卡组浏览 / 手动弃牌 -->
-    <div class="card" id="deckCard" hidden style="margin-top:20px">
-      <h2 class="sec-head"><span id="deckTitle">卡组</span>
-        <button class="btn ghost mini" id="btnDeckClose">✕ 关闭</button></h2>
-      <p class="lead">问答特效里的「弃掉 N 张」是自然语言，只能手动执行，在这里点「弃掉」即可。弃牌与打出一样消耗卡组循环。</p>
-      <div id="deckBody"></div>
-    </div>
-
-    <div class="card" style="margin-top:20px">
-      <h2>战斗日志</h2>
-      <div id="log"><p class="empty">还没有记录。</p></div>
+      <div class="card">
+        <div class="sec-head" style="margin-bottom:8px">
+          <h2 style="font-size:17px;margin:0">战斗战报记录</h2>
+          <button class="btn ghost mini" id="btnClearLog">清空记录</button>
+        </div>
+        <div id="logBox"></div>
+      </div>
     </div>
   </main>
 </div>
 
 <div class="toast" id="toast"></div>
-<script src="战斗器.js?v=66"></script>
+<script src="建卡器.js?v=3"></script>
+<script src="战斗器.js?v=3"></script>
 </body>
 </html>
